@@ -1,0 +1,2 @@
+Hello from HouseOS!
+This is a tiny filesystem test.
