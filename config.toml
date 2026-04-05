@@ -1,5 +1,0 @@
-[build]
-target = "i686-houseos.json"
-
-[target.'i686-houseos.json']
-rustflags = "-C link-arg=-Tlinker.ld"
