@@ -7,3 +7,10 @@ HouseOS is an experimental OS written in Assembly and Rust with a custom kernel,
 ![OS](https://img.shields.io/badge/OS-HouseOS-blue)
 ![Language](https://img.shields.io/badge/Rust-77%25-orange)
 ![Status](https://img.shields.io/badge/status-in%20development-yellow)
+
+<details>
+<summary>Натисни щоб відкрити</summary>
+
+Тут прихований текст 😎
+
+</details>
