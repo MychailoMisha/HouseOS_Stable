@@ -1,35 +1,21 @@
-<h1 align="center">🚀 HouseOS_Stable</h1>
+<h1 align="center">🚀 HouseOS Stable</h1>
+
+<p align="center">
+  <b>Experimental Operating System built with Assembly & Rust</b>
+</p>
 
 <p align="center">
   <a href="https://github.com/MychailoMisha/HouseOS_Stable/blob/main/houseos.iso">
-    <img src="https://img.shields.io/badge/Download-ISO-blue?style=for-the-badge">
+    <img src="https://img.shields.io/badge/Download-ISO-blue?style=for-the-badge&logo=linux">
   </a>
 </p>
 
 <p align="center">
-  Experimental OS written in Assembly & Rust with custom kernel, GUI, and file system.
+  <img src="https://img.shields.io/badge/OS-HouseOS-4c1?style=for-the-badge">
+  <img src="https://img.shields.io/badge/Type-Experimental-red?style=for-the-badge">
+  <img src="https://img.shields.io/badge/Kernel-Custom-black?style=for-the-badge">
+  <img src="https://img.shields.io/badge/Status-Active-yellow?style=for-the-badge">
 </p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/OS-HouseOS-blue?style=for-the-badge">
-  <img src="https://img.shields.io/badge/Rust-77%25-orange?style=for-the-badge">
-  <img src="https://img.shields.io/badge/ASM-5.9%25-lightgrey?style=for-the-badge">
-  <img src="https://img.shields.io/badge/PowerShell-16.5%25-blue?style=for-the-badge">
-  <img src="https://img.shields.io/badge/status-in%20development-yellow?style=for-the-badge">
-</p>
-
----
-
-## 🧠 About
-
-HouseOS is an experimental operating system focused on:
-- 🔐 User freedom (Root access)
-- ⚡ Performance
-- 🧩 Custom architecture
-
----
-
-## 💻 Languages Used
 
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-77.4%25-orange?style=for-the-badge&logo=rust">
@@ -40,40 +26,73 @@ HouseOS is an experimental operating system focused on:
 
 ---
 
+## 🧠 Overview
+
+HouseOS is an **experimental operating system** designed to explore low-level system architecture, performance, and full user control.
+
+Built from scratch with a custom kernel, graphical interface, and file system.
+
+---
+
+## ⚙️ Core Features
+
+- 🔐 Full system control (Root access)
+- ⚡ High performance & low-level optimization
+- 🧠 Experimental architecture design
+- 🖥️ Custom GUI environment
+- 📂 Custom file system
+
+---
+
+## 💻 Technology Stack
+
+<div align="center">
+
+| Component | Technology |
+|----------|-----------|
+| Kernel   | Assembly + Rust |
+| System   | Low-level architecture |
+| Scripts  | PowerShell |
+| Build    | Linker Script |
+
+</div>
+
+---
+
 ## 📦 Download
 
 <p align="center">
   <a href="https://github.com/MychailoMisha/HouseOS_Stable/blob/main/houseos.iso">
-    <img src="https://img.shields.io/badge/Download%20ISO-Click%20Here-success?style=for-the-badge">
+    <img src="https://img.shields.io/badge/Download%20ISO-Get%20HouseOS-success?style=for-the-badge&logo=linux">
   </a>
 </p>
 
 ---
 
-## ⚙️ Features
+## 🚧 Project Status
 
-- 🔐 Full control (Root access)
-- 🧠 Smart permissions system
-- ⚡ Fast and lightweight
-- 🖥️ Custom GUI
+<div align="center">
+
+⚠️ This project is under active development  
+Features may change, break, or be incomplete  
+
+</div>
 
 ---
 
-## 🔽 More Info
+## 🔽 Additional Info
 
 <details>
-<summary>Натисни щоб відкрити</summary>
+<summary>Click to expand</summary>
 
-😎 Тут можна написати:
-- плани
-- roadmap
-- опис системи
-- або будь-що приховане
+- Experimental OS project  
+- Focused on learning and system-level development  
+- Not intended for production use  
 
 </details>
 
 ---
 
 <p align="center">
-  Made with ❤️ by Mychailo
+  ⚡ Built for experimentation • Not for production
 </p>
