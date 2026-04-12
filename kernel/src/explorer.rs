@@ -3,10 +3,11 @@ use crate::fat32::{DirEntry, Fat32};
 use crate::system;
 use crate::window;
 
-const LINE_HEIGHT: usize = 12;
-const PAD: usize = 10;
-const TOOLBAR_H: usize = 18;
-const MAX_ENTRIES: usize = 96;
+const LINE_HEIGHT: usize = 18;          // Збільшено для кращої читабельності
+const PAD: usize = 12;
+const TOOLBAR_H: usize = 28;            // Збільшено для кнопок
+const SCROLL_W: usize = 14;
+const MAX_ENTRIES: usize = 128;
 const MAX_PATH: usize = 12;
 
 const ENTRY_BACK: u8 = 0;
@@ -82,7 +83,10 @@ struct Layout {
     list_header_y: usize,
     list_start_y: usize,
     list_w: usize,
+    list_h: usize,
     max_lines: usize,
+    scroll_thumb_h: usize,
+    scroll_thumb_y: usize,
 }
 
 pub struct Explorer {
@@ -100,7 +104,9 @@ pub struct Explorer {
     entries: [FileEntry; MAX_ENTRIES],
     entry_count: usize,
     visible_count: usize,
+    scroll_offset: usize,
     entries_dirty: bool,
+    selected_entry: Option<usize>,
 }
 
 impl Explorer {
@@ -120,7 +126,9 @@ impl Explorer {
             entries: [FileEntry::EMPTY; MAX_ENTRIES],
             entry_count: 0,
             visible_count: 0,
+            scroll_offset: 0,
             entries_dirty: true,
+            selected_entry: None,
         }
     }
 
@@ -140,6 +148,7 @@ impl Explorer {
         self.view = ExplorerView::Root;
         self.reset_path();
         self.entries_dirty = true;
+        self.selected_entry = None;
     }
 
     pub fn show_bin(&mut self, fb: &Framebuffer) {
@@ -153,6 +162,7 @@ impl Explorer {
         }
         self.view = ExplorerView::Bin;
         self.entries_dirty = true;
+        self.selected_entry = None;
     }
 
     pub fn hide(&mut self, _fb: &Framebuffer) {
@@ -168,38 +178,65 @@ impl Explorer {
         }
         let layout = self.layout(fb, self.content_rect(fb));
 
+        // Бічна панель
         let sidebar_x = layout.x + 1;
         let sidebar_y = layout.body_y + PAD;
         let sidebar_h = layout.body_h.saturating_sub(PAD * 2);
         if hit(x, y, sidebar_x, sidebar_y, layout.sidebar_w, sidebar_h) {
-            let row = (y.saturating_sub(sidebar_y)) / LINE_HEIGHT;
+            let row = (y.saturating_sub(sidebar_y + LINE_HEIGHT + 4)) / LINE_HEIGHT;
             if row == 0 {
                 self.view = ExplorerView::Root;
                 self.reset_path();
                 self.entries_dirty = true;
+                self.selected_entry = None;
                 self.redraw(fb);
                 return true;
-            }
-            if row == 1 {
+            } else if row == 1 {
                 self.view = ExplorerView::Bin;
                 self.entries_dirty = true;
+                self.selected_entry = None;
                 self.redraw(fb);
                 return true;
             }
         }
 
+        // Смуга прокрутки
+        let scroll_x = layout.list_x + layout.list_w + 4;
+        let scroll_y = layout.list_start_y;
+        let scroll_h = layout.list_h;
+        if x >= scroll_x && x < scroll_x + SCROLL_W && y >= scroll_y && y < scroll_y + scroll_h {
+            let max_scroll = self.entry_count.saturating_sub(layout.max_lines);
+            if max_scroll > 0 {
+                let track_h = scroll_h - 2 * SCROLL_W;
+                let ratio = (y.saturating_sub(scroll_y + SCROLL_W)) as f32 / track_h as f32;
+                let new_scroll = (ratio * max_scroll as f32) as usize;
+                self.scroll_offset = new_scroll.min(max_scroll);
+                self.selected_entry = None;
+                self.redraw(fb);
+            }
+            return true;
+        }
+
+        // Список файлів
         if self.view == ExplorerView::Root {
             let list_y = layout.list_start_y;
-            if x >= layout.list_x && x < layout.x + layout.w {
-                if y >= list_y {
-                    let row = (y - list_y) / LINE_HEIGHT;
-                    if row < self.visible_count {
-                        let entry = self.entries[row];
+            if x >= layout.list_x && x < layout.list_x + layout.list_w && y >= list_y && y < list_y + layout.list_h {
+                let rel_y = y.saturating_sub(list_y);
+                let row = rel_y / LINE_HEIGHT;
+                if row < self.visible_count {
+                    let actual_index = self.scroll_offset + row;
+                    if actual_index < self.entry_count {
+                        let entry = self.entries[actual_index];
+                        // Вибір елементу
+                        self.selected_entry = Some(actual_index);
+                        self.redraw(fb);
+
                         if entry.kind == ENTRY_BACK {
                             if self.depth > 0 {
                                 self.depth -= 1;
                                 self.current_cluster = self.cluster_stack[self.depth];
                                 self.entries_dirty = true;
+                                self.selected_entry = None;
                                 self.redraw(fb);
                                 return true;
                             }
@@ -213,10 +250,12 @@ impl Explorer {
                                 self.depth += 1;
                                 self.current_cluster = entry.cluster;
                                 self.entries_dirty = true;
+                                self.selected_entry = None;
                                 self.redraw(fb);
                                 return true;
                             }
                         }
+                        // Для файлів можна додати відкриття
                     }
                 }
             }
@@ -239,48 +278,66 @@ impl Explorer {
             return;
         }
         let (x, y, w, h) = self.rect(fb);
-        let chrome = window::draw_window(
-            fb,
-            x,
-            y,
-            w,
-            h,
-            match self.view {
-                ExplorerView::Root => b"Explorer",
-                ExplorerView::Bin => b"Recycle Bin",
-            },
-        );
-        let layout = self.layout(fb, (chrome.content_x, chrome.content_y, chrome.content_w, chrome.content_h));
         let ui = system::ui_settings();
         let accent = ui.accent;
-        let (toolbar, sidebar, list_alt, text, muted) = if ui.dark {
-            (0x00262626, 0x00262626, 0x00292F36, 0x00E6E6E6, 0x00989898)
-        } else {
-            (0x00F3F3F3, 0x00F7F7F7, 0x00EEF5FF, 0x00111111, 0x006A6A6A)
-        };
+        let is_dark = ui.dark;
 
-        display::fill_rect(
-            fb,
-            layout.content_x,
-            layout.toolbar_y,
-            layout.content_w,
-            TOOLBAR_H,
-            toolbar,
-        );
-        display::fill_rect(
-            fb,
-            layout.content_x,
-            layout.body_y,
-            layout.sidebar_w,
-            layout.body_h,
-            sidebar,
-        );
+        // Акриловий фон
+        draw_acrylic_surface(fb, x, y, w, h, is_dark);
+
+        // Тонка рамка
+        let border_color = if is_dark { 0x00404040 } else { 0x00C0C0C0 };
+        display::fill_rect(fb, x, y, w, 1, border_color);
+        display::fill_rect(fb, x, y + h.saturating_sub(1), w, 1, border_color);
+        display::fill_rect(fb, x, y, 1, h, border_color);
+        display::fill_rect(fb, x + w.saturating_sub(1), y, 1, h, border_color);
+
+        // Заголовок
+        let header_bg = if is_dark { 0x00333333 } else { 0x00F3F3F3 };
+        display::fill_rect(fb, x + 1, y + 1, w.saturating_sub(2), window::HEADER_H, header_bg);
+        display::fill_rect(fb, x + 1, y + window::HEADER_H - 1, w.saturating_sub(2), 2, accent);
 
         let mut writer = crate::TextWriter::new(*fb);
-        writer.set_color(muted);
-        writer.set_pos(layout.content_x + PAD, layout.toolbar_y + 4);
-        writer.write_bytes(b"Path: ");
-        writer.set_color(text);
+        let text_color = if is_dark { 0x00FFFFFF } else { 0x00000000 };
+        writer.set_color(text_color);
+        writer.set_pos(x + PAD, y + 8);
+        match self.view {
+            ExplorerView::Root => writer.write_bytes(b"File Explorer"),
+            ExplorerView::Bin => writer.write_bytes(b"Recycle Bin"),
+        }
+
+        // Кнопка закриття
+        let close = window::close_rect(x, y, w);
+        display::fill_rect(fb, close.0, close.1, close.2, close.3, 0x00E81123);
+        writer.set_color(0x00FFFFFF);
+        writer.set_pos(close.0 + 4, close.1 + 3);
+        writer.write_bytes(b"X");
+
+        // Область вмісту
+        let content_x = x + 1;
+        let content_y = y + window::HEADER_H + 1;
+        let content_w = w.saturating_sub(2);
+        let content_h = h.saturating_sub(window::HEADER_H + 2);
+        let content_bg = if is_dark { 0x801C1C1C } else { 0x80FFFFFF };
+        display::fill_rect(fb, content_x, content_y, content_w, content_h, content_bg);
+
+        let layout = self.layout(fb, (content_x, content_y, content_w, content_h));
+
+        // Тулбар
+        let toolbar_bg = if is_dark { 0x00333333 } else { 0x00F0F0F0 };
+        display::fill_rect(fb, layout.content_x, layout.toolbar_y, layout.content_w, TOOLBAR_H, toolbar_bg);
+        // Кнопки навігації (заглушки)
+        let btn_w = 60;
+        let btn_h = TOOLBAR_H - 4;
+        let btn_y = layout.toolbar_y + 2;
+        let btn_x = layout.content_x + PAD;
+        display::fill_rect(fb, btn_x, btn_y, btn_w, btn_h, if is_dark { 0x00505050 } else { 0x00D0D0D0 });
+        writer.set_color(text_color);
+        writer.set_pos(btn_x + 8, btn_y + 5);
+        writer.write_bytes(b"Back");
+        // Шлях
+        writer.set_color(if is_dark { 0x00AAAAAA } else { 0x00666666 });
+        writer.set_pos(btn_x + btn_w + PAD, layout.toolbar_y + 6);
         if self.view == ExplorerView::Bin {
             writer.write_bytes(b"Recycle Bin");
         } else {
@@ -296,107 +353,127 @@ impl Explorer {
             }
         }
 
-        let sidebar_x = layout.content_x + PAD;
-        let sidebar_y = layout.body_y + PAD;
-        writer.set_color(muted);
-        writer.set_pos(sidebar_x, sidebar_y);
+        // Бічна панель
+        let sidebar_bg = if is_dark { 0x00262626 } else { 0x00FAFAFA };
+        display::fill_rect(fb, layout.content_x, layout.body_y, layout.sidebar_w, layout.body_h, sidebar_bg);
+        writer.set_color(if is_dark { 0x00AAAAAA } else { 0x00666666 });
+        writer.set_pos(layout.content_x + PAD, layout.body_y + PAD);
         writer.write_bytes(b"Places");
 
-        let item_y = sidebar_y + LINE_HEIGHT + 4;
+        let item_y = layout.body_y + PAD + LINE_HEIGHT + 4;
         draw_sidebar_item(
-            fb,
-            &mut writer,
-            sidebar_x,
-            item_y,
+            fb, &mut writer,
+            layout.content_x + PAD, item_y,
             layout.sidebar_w.saturating_sub(PAD * 2),
-            b"Files",
-            self.view == ExplorerView::Root,
-            accent,
-            text,
+            b"Files", self.view == ExplorerView::Root,
+            accent, text_color,
         );
         draw_sidebar_item(
-            fb,
-            &mut writer,
-            sidebar_x,
-            item_y + LINE_HEIGHT,
+            fb, &mut writer,
+            layout.content_x + PAD, item_y + LINE_HEIGHT,
             layout.sidebar_w.saturating_sub(PAD * 2),
-            b"Recycle Bin",
-            self.view == ExplorerView::Bin,
-            accent,
-            text,
+            b"Recycle Bin", self.view == ExplorerView::Bin,
+            accent, text_color,
         );
 
-        writer.set_color(muted);
+        // Заголовки списку
+        writer.set_color(if is_dark { 0x00AAAAAA } else { 0x00666666 });
         writer.set_pos(layout.list_x, layout.list_header_y);
         writer.write_bytes(b"Name");
-        writer.set_pos(layout.list_x + layout.list_w.saturating_sub(40), layout.list_header_y);
+        writer.set_pos(layout.list_x + layout.list_w.saturating_sub(60), layout.list_header_y);
         writer.write_bytes(b"Size");
 
+        // Оновлення записів
         if self.view == ExplorerView::Root {
             let fs_img = self.fs_img;
-        if let Some(fs) = fs_img.and_then(Fat32::new) {
+            if let Some(fs) = fs_img.and_then(Fat32::new) {
                 if self.entries_dirty {
                     self.rebuild_entries(&fs, layout.max_lines);
                     self.entries_dirty = false;
+                    self.scroll_offset = 0;
+                    self.selected_entry = None;
                 } else {
-                    self.visible_count = self.entry_count.min(layout.max_lines);
+                    let max_scroll = self.entry_count.saturating_sub(layout.max_lines);
+                    if self.scroll_offset > max_scroll {
+                        self.scroll_offset = max_scroll;
+                    }
+                    self.visible_count = (self.entry_count - self.scroll_offset).min(layout.max_lines);
                 }
+
+                // Малювання списку
                 for i in 0..self.visible_count {
+                    let entry_idx = self.scroll_offset + i;
+                    let entry = self.entries[entry_idx];
                     let row_y = layout.list_start_y + i * LINE_HEIGHT;
-                    if (i & 1) == 1 {
-                        display::fill_rect(
-                            fb,
-                            layout.list_x.saturating_sub(2),
-                            row_y.saturating_sub(2),
-                            layout.list_w + 4,
-                            LINE_HEIGHT,
-                            list_alt,
-                        );
-                    }
-                    let entry = self.entries[i];
-                    if entry.kind == ENTRY_BACK {
-                        writer.set_color(muted);
-                        writer.set_pos(layout.list_x, row_y);
-                        writer.write_bytes(&entry.name[..entry.name_len]);
-                        continue;
-                    }
-                    let is_dir = entry.kind == ENTRY_DIR;
-                    writer.set_color(if is_dir { accent } else { text });
-                    writer.set_pos(layout.list_x, row_y);
-                    if is_dir {
-                        writer.write_bytes(b"[DIR] ");
+
+                    // Фон рядка
+                    let row_bg = if Some(entry_idx) == self.selected_entry {
+                        if is_dark { 0x403366FF } else { 0x40CCE0FF } // акцентне виділення
+                    } else if (i & 1) == 1 {
+                        if is_dark { 0x00333333 } else { 0x00F5F5F5 }
                     } else {
-                        writer.write_bytes(b"      ");
+                        0x00000000
+                    };
+                    if row_bg != 0 {
+                        display::fill_rect(fb, layout.list_x, row_y, layout.list_w, LINE_HEIGHT, row_bg);
                     }
-                    writer.write_bytes(&entry.name[..entry.name_len]);
-                    if is_dir {
+
+                    writer.set_color(if entry.kind == ENTRY_DIR { accent } else { text_color });
+                    writer.set_pos(layout.list_x + 4, row_y + 3);
+
+                    if entry.kind == ENTRY_BACK {
+                        writer.write_bytes(b"..");
+                    } else if entry.kind == ENTRY_DIR {
+                        writer.write_bytes(b"[DIR] ");
+                        writer.write_bytes(&entry.name[..entry.name_len]);
                         writer.write_bytes(b"/");
                     } else {
+                        writer.write_bytes(b"      ");
+                        writer.write_bytes(&entry.name[..entry.name_len]);
+                    }
+
+                    if entry.kind != ENTRY_DIR && entry.kind != ENTRY_BACK {
                         let mut buf = [0u8; 12];
                         let len = write_u32(&mut buf, entry.size);
                         if len > 0 {
-                            let size_x =
-                                layout.list_x + layout.list_w.saturating_sub(len * 8);
-                            writer.set_color(muted);
-                            writer.set_pos(size_x, row_y);
+                            writer.set_color(if is_dark { 0x00AAAAAA } else { 0x00666666 });
+                            let size_x = layout.list_x + layout.list_w.saturating_sub(len * 8 + 8);
+                            writer.set_pos(size_x, row_y + 3);
                             writer.write_bytes(&buf[..len]);
                         }
                     }
                 }
+
+                // Смуга прокрутки
+                let max_scroll = self.entry_count.saturating_sub(layout.max_lines);
+                if max_scroll > 0 {
+                    let scroll_x = layout.list_x + layout.list_w + 4;
+                    let scroll_y = layout.list_start_y;
+                    let scroll_h = layout.list_h;
+                    // Трек
+                    display::fill_rect(fb, scroll_x, scroll_y, SCROLL_W, scroll_h, if is_dark { 0x00323232 } else { 0x00E0E0E0 });
+                    // Повзунок
+                    let thumb_h = ((layout.max_lines as f32 / self.entry_count as f32) * scroll_h as f32) as usize;
+                    let thumb_h = thumb_h.max(16);
+                    let thumb_y = scroll_y + ((self.scroll_offset as f32 / max_scroll as f32) * (scroll_h - thumb_h) as f32) as usize;
+                    display::fill_rect(fb, scroll_x, thumb_y, SCROLL_W, thumb_h, if is_dark { 0x00808080 } else { 0x00A0A0A0 });
+                }
+
                 if self.entry_count == 0 {
-                    writer.set_color(muted);
-                    writer.set_pos(layout.list_x, layout.list_start_y);
-                    writer.write_bytes(b"(empty)");
+                    writer.set_color(if is_dark { 0x00AAAAAA } else { 0x00666666 });
+                    writer.set_pos(layout.list_x, layout.list_start_y + 4);
+                    writer.write_bytes(b"(empty folder)");
                 }
             } else {
-                writer.set_color(muted);
-                writer.set_pos(layout.list_x, layout.list_start_y);
-                writer.write_bytes(b"(no FAT32 image)");
+                writer.set_color(if is_dark { 0x00AAAAAA } else { 0x00666666 });
+                writer.set_pos(layout.list_x, layout.list_start_y + 4);
+                writer.write_bytes(b"(no FAT32 image mounted)");
             }
         } else {
-            writer.set_color(muted);
-            writer.set_pos(layout.list_x, layout.list_start_y);
-            writer.write_bytes(b"(empty)");
+            // Recycle Bin view (заглушка)
+            writer.set_color(if is_dark { 0x00AAAAAA } else { 0x00666666 });
+            writer.set_pos(layout.list_x, layout.list_start_y + 4);
+            writer.write_bytes(b"Recycle Bin is empty.");
         }
     }
 
@@ -426,11 +503,7 @@ impl Explorer {
             self.entry_count += 1;
         }
 
-        if self.entry_count > max_lines {
-            self.visible_count = max_lines;
-        } else {
-            self.visible_count = self.entry_count;
-        }
+        self.visible_count = self.entry_count.min(max_lines);
     }
 
     fn layout(&self, fb: &Framebuffer, content: (usize, usize, usize, usize)) -> Layout {
@@ -442,35 +515,22 @@ impl Explorer {
         let toolbar_y = content_y;
         let body_y = content_y + TOOLBAR_H;
         let body_h = content_h.saturating_sub(TOOLBAR_H);
-        let sidebar_w = (content_w / 3).max(150).min(content_w.saturating_sub(140));
+        let sidebar_w = (content_w / 4).max(120).min(content_w.saturating_sub(200));
         let list_x = content_x + sidebar_w + PAD;
         let list_header_y = body_y + PAD;
         let list_start_y = list_header_y + LINE_HEIGHT;
-        let list_w = content_w.saturating_sub(sidebar_w + PAD * 2 + 2);
+        let list_w = content_w.saturating_sub(sidebar_w + PAD * 2 + SCROLL_W + 4);
         let list_h = body_h.saturating_sub(PAD * 2 + LINE_HEIGHT);
-        let max_lines = if LINE_HEIGHT == 0 {
-            0
-        } else {
-            list_h / LINE_HEIGHT
-        };
+        let max_lines = if LINE_HEIGHT == 0 { 0 } else { list_h / LINE_HEIGHT };
         Layout {
-            x,
-            y,
-            w,
-            h,
-            content_x,
-            content_y,
-            content_w,
-            content_h,
-            toolbar_y,
-            body_y,
-            body_h,
+            x, y, w, h,
+            content_x, content_y, content_w, content_h,
+            toolbar_y, body_y, body_h,
             sidebar_w,
-            list_x,
-            list_header_y,
-            list_start_y,
-            list_w,
+            list_x, list_header_y, list_start_y, list_w, list_h,
             max_lines,
+            scroll_thumb_h: 0,
+            scroll_thumb_y: 0,
         }
     }
 
@@ -542,11 +602,8 @@ fn write_u32(buf: &mut [u8], mut val: u32) -> usize {
 }
 
 fn calc_rect(fb: &Framebuffer) -> (usize, usize, usize, usize) {
-    let w = fb.width / 2;
-    let h = fb.height / 2;
-    if w == 0 || h == 0 {
-        return (0, 0, 0, 0);
-    }
+    let w = (fb.width * 3 / 4).min(800).max(400);
+    let h = (fb.height * 3 / 4).min(600).max(300);
     let x = (fb.width - w) / 2;
     let y = (fb.height - h) / 2;
     (x, y, w, h)
@@ -554,4 +611,9 @@ fn calc_rect(fb: &Framebuffer) -> (usize, usize, usize, usize) {
 
 fn hit(px: usize, py: usize, x: usize, y: usize, w: usize, h: usize) -> bool {
     px >= x && py >= y && px < x + w && py < y + h
+}
+
+fn draw_acrylic_surface(fb: &Framebuffer, x: usize, y: usize, w: usize, h: usize, is_dark: bool) {
+    let base = if is_dark { 0x801C1C1C } else { 0x80F0F0F0 };
+    display::fill_rect(fb, x, y, w, h, base);
 }
