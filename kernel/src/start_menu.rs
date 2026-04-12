@@ -1,11 +1,13 @@
 use crate::display::{self, Framebuffer};
 use crate::system;
 
-const LINE_HEIGHT: usize = 18;
+const LINE_HEIGHT: usize = 20;
 const PAD: usize = 12;
-const HEADER_H: usize = 28;
+const HEADER_H: usize = 68;
 const CLOSE_SIZE: usize = 14;
 const BAR_H: usize = 26;
+const ICON_SIZE: usize = 16;
+const AVATAR_SIZE: usize = 36;
 
 #[derive(Copy, Clone)]
 pub enum StartAction {
@@ -67,27 +69,33 @@ impl StartMenu {
             return None;
         }
         let (wx, wy, ww, _) = self.rect(fb);
+        
+        // Закриття через хрестик
         let (cx, cy, cw, ch) = close_rect(wx, wy, ww);
         if hit(x, y, cx, cy, cw, ch) {
             self.hide(fb);
             return None;
         }
-        let list_x = wx + PAD;
-        let list_y = wy + HEADER_H + PAD;
-        if x >= list_x && x < wx + ww {
-            if y >= list_y {
-                let row = (y - list_y) / LINE_HEIGHT;
-                return match row {
-                    0 => Some(StartAction::OpenConsole),
-                    1 => Some(StartAction::OpenExplorer),
-                    2 => Some(StartAction::OpenClipboard),
-                    3 => Some(StartAction::OpenBin),
-                    4 => Some(StartAction::ToggleTheme),
-                    5 => Some(StartAction::Reboot),
-                    6 => Some(StartAction::Shutdown),
-                    _ => None,
-                };
-            }
+
+        // Перевірка кліку по меню
+        let _list_x = wx + PAD;
+        let list_y = wy + HEADER_H + 8;
+        
+        if x >= wx && x < wx + ww && y >= list_y {
+            let row = (y - list_y) / LINE_HEIGHT;
+            // Карта дій (пропускаємо роздільник на 4-й позиції)
+            return match row {
+                0 => Some(StartAction::OpenConsole),
+                1 => Some(StartAction::OpenExplorer),
+                2 => Some(StartAction::OpenClipboard),
+                3 => Some(StartAction::OpenBin),
+                // Роздільник
+                4 => None,
+                5 => Some(StartAction::ToggleTheme),
+                6 => Some(StartAction::Reboot),
+                7 => Some(StartAction::Shutdown),
+                _ => None,
+            };
         }
         None
     }
@@ -106,71 +114,106 @@ impl StartMenu {
         let (x, y, w, h) = self.rect(fb);
         let ui = system::ui_settings();
         let accent = ui.accent;
-        let (border, bg, header_bg, header_text, text) = if ui.dark {
-            (
-                0x00363636,
-                0x00212121,
-                0x002A2A2A,
-                0x00FFFFFF,
-                0x00E6E6E6,
-            )
-        } else {
-            (
-                0x00D0D0D0,
-                0x00FFFFFF,
-                0x00F7F7F7,
-                0x00000000,
-                0x00111111,
-            )
-        };
+        let is_dark = ui.dark;
 
-        display::fill_rect(fb, x, y, w, h, bg);
-        display::fill_rect(fb, x, y, w, 1, border);
-        display::fill_rect(fb, x, y + h.saturating_sub(1), w, 1, border);
-        display::fill_rect(fb, x, y, 1, h, border);
-        display::fill_rect(fb, x + w.saturating_sub(1), y, 1, h, border);
+        // --- АКРИЛОВИЙ ФОН (Windows 10 Fluent Design) ---
+        draw_acrylic_surface(fb, x, y, w, h, is_dark);
+        
+        // Тонка рамка
+        let border_color = if is_dark { 0x00404040 } else { 0x00C0C0C0 };
+        display::fill_rect(fb, x, y, w, 1, border_color);
+        display::fill_rect(fb, x, y + h.saturating_sub(1), w, 1, border_color);
+        display::fill_rect(fb, x, y, 1, h, border_color);
+        display::fill_rect(fb, x + w.saturating_sub(1), y, 1, h, border_color);
 
+        // --- ЗАГОЛОВОК (Header) ---
+        let header_bg = if is_dark { 0x00333333 } else { 0x00F3F3F3 };
         display::fill_rect(fb, x + 1, y + 1, w.saturating_sub(2), HEADER_H, header_bg);
-        display::fill_rect(
-            fb,
-            x + 1,
-            y + HEADER_H.saturating_sub(2),
-            w.saturating_sub(2),
-            2,
-            accent,
-        );
+        
+        // Аватар (коло)
+        let avatar_x = x + 16;
+        let avatar_y = y + 16;
+        draw_avatar(fb, avatar_x, avatar_y, AVATAR_SIZE, accent);
+        
+        // Текст "Start" та ім'я користувача
+        let mut writer = crate::TextWriter::new(*fb);
+        let text_color = if is_dark { 0x00FFFFFF } else { 0x00000000 };
+        writer.set_color(text_color);
+        writer.set_pos(avatar_x + AVATAR_SIZE + 12, y + 22);
+        writer.write_bytes(b"User");
+        writer.set_pos(avatar_x + AVATAR_SIZE + 12, y + 40);
+        writer.set_color(if is_dark { 0x00AAAAAA } else { 0x00666666 });
+        writer.write_bytes(b"user@aurora-os");
+
+        // Кнопка закриття (X) в стилі Windows 10
         let (cx, cy, cw, ch) = close_rect(x, y, w);
         display::fill_rect(fb, cx, cy, cw, ch, 0x00E81123);
-
-        let mut writer = crate::TextWriter::new(*fb);
-        writer.set_color(header_text);
-        writer.set_pos(x + PAD, y + 8);
-        writer.write_bytes(b"Start");
+        writer.set_color(0x00FFFFFF);
         writer.set_pos(cx + 4, cy + 3);
         writer.write_bytes(b"X");
 
-        writer.set_color(text);
+        // --- СПИСОК ДІЙ ---
         let list_x = x + PAD;
-        let list_y = y + HEADER_H + PAD;
-        writer.set_pos(list_x, list_y);
-        writer.write_bytes(b"Console");
-        writer.set_pos(list_x, list_y + LINE_HEIGHT);
-        writer.write_bytes(b"Explorer");
-        writer.set_pos(list_x, list_y + LINE_HEIGHT * 2);
-        writer.write_bytes(b"Clipboard");
-        writer.set_pos(list_x, list_y + LINE_HEIGHT * 3);
-        writer.write_bytes(b"Recycle Bin");
-        let theme_label: &[u8] = if ui.dark {
-            b"Theme: Dark"
-        } else {
-            b"Theme: Light"
-        };
-        writer.set_pos(list_x, list_y + LINE_HEIGHT * 4);
-        writer.write_bytes(theme_label);
-        writer.set_pos(list_x, list_y + LINE_HEIGHT * 5);
-        writer.write_bytes(b"Restart");
-        writer.set_pos(list_x, list_y + LINE_HEIGHT * 6);
-        writer.write_bytes(b"Shutdown");
+        let list_y = y + HEADER_H + 8;
+        writer.set_color(text_color);
+        
+        let items = [
+            ("Console", ">"),
+            ("Explorer", "#"),
+            ("Clipboard", "@"),
+            ("Recycle Bin", "%"),
+        ];
+        
+        let actions_after = [
+            ("Theme", if is_dark { "O" } else { "o" }),
+            ("Restart", "R"),
+            ("Shutdown", "S"),
+        ];
+
+        // Малюємо основні пункти
+        let mut current_row = 0;
+        for (label, icon) in items.iter() {
+            let row_y = list_y + current_row * LINE_HEIGHT;
+            
+            // Іконка
+            writer.set_pos(list_x + 4, row_y + 3);
+            writer.write_bytes(icon.as_bytes());
+            
+            // Текст
+            writer.set_color(text_color);
+            writer.set_pos(list_x + ICON_SIZE + 12, row_y + 3);
+            writer.write_bytes(label.as_bytes());
+            
+            current_row += 1;
+        }
+        
+        // Роздільник
+        let sep_y = list_y + current_row * LINE_HEIGHT + 10;
+        let sep_color = if is_dark { 0x00444444 } else { 0x00CCCCCC };
+        display::fill_rect(fb, list_x, sep_y, w - PAD * 2, 1, sep_color);
+        current_row += 1;
+
+        // Малюємо нижні пункти
+        let theme_label = if is_dark { "Switch to Light Mode" } else { "Switch to Dark Mode" };
+        
+        for (i, (label, icon)) in actions_after.iter().enumerate() {
+            let row_y = list_y + (current_row + i) * LINE_HEIGHT;
+            
+            writer.set_pos(list_x + 4, row_y + 3);
+            writer.write_bytes(icon.as_bytes());
+            
+            writer.set_color(text_color);
+            writer.set_pos(list_x + ICON_SIZE + 12, row_y + 3);
+            
+            if i == 0 {
+                writer.write_bytes(theme_label.as_bytes());
+            } else {
+                writer.write_bytes(label.as_bytes());
+            }
+        }
+
+        // АКЦЕНТНА ЛІНІЯ (знизу заголовка)
+        display::fill_rect(fb, x + 1, y + HEADER_H.saturating_sub(1), w.saturating_sub(2), 2, accent);
     }
 
     pub fn rect(&self, fb: &Framebuffer) -> (usize, usize, usize, usize) {
@@ -181,29 +224,53 @@ impl StartMenu {
     }
 }
 
+fn draw_acrylic_surface(fb: &Framebuffer, x: usize, y: usize, w: usize, h: usize, is_dark: bool) {
+    let base = if is_dark { 0x801C1C1C } else { 0x80F0F0F0 };
+    display::fill_rect(fb, x, y, w, h, base);
+}
+
+fn draw_avatar(fb: &Framebuffer, x: usize, y: usize, size: usize, color: u32) {
+    let r = size / 2;
+    let _cx = x + r;
+    let _cy = y + r;
+    
+    for dy in 0..size {
+        for dx in 0..size {
+            let px = x + dx;
+            let py = y + dy;
+            let dist = ((dx as isize - r as isize).pow(2) + (dy as isize - r as isize).pow(2)) as f32;
+            if dist <= (r * r) as f32 {
+                display::put_pixel(fb, px, py, color);
+            }
+        }
+    }
+    
+    // Біла обводка
+    for dy in 0..size {
+        for dx in 0..size {
+            let px = x + dx;
+            let py = y + dy;
+            let dist = ((dx as isize - r as isize).pow(2) + (dy as isize - r as isize).pow(2)) as f32;
+            let outer = (r * r) as f32;
+            let inner = ((r - 1) * (r - 1)) as f32;
+            if dist <= outer && dist > inner {
+                display::put_pixel(fb, px, py, 0x00FFFFFF);
+            }
+        }
+    }
+}
+
 fn calc_rect(fb: &Framebuffer) -> (usize, usize, usize, usize) {
-    let mut w = fb.width / 3;
-    let mut h = fb.height / 3;
-    if w < 220 {
-        w = 220;
-    }
-    if w > 320 {
-        w = 320;
-    }
-    if h < 220 {
-        h = 220;
-    }
-    if h > 320 {
-        h = 320;
-    }
+    let w = 340;
+    let h = 420;
     let x = 16usize;
     let y = fb.height.saturating_sub(h + BAR_H + 10);
     (x, y, w, h)
 }
 
 fn close_rect(x: usize, y: usize, w: usize) -> (usize, usize, usize, usize) {
-    let cx = x + w.saturating_sub(CLOSE_SIZE + 6);
-    let cy = y + (HEADER_H.saturating_sub(CLOSE_SIZE)) / 2 + 1;
+    let cx = x + w.saturating_sub(CLOSE_SIZE + 12);
+    let cy = y + 12;
     (cx, cy, CLOSE_SIZE, CLOSE_SIZE)
 }
 
