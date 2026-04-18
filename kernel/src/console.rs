@@ -1,20 +1,13 @@
 use crate::clipboard;
+use crate::commands::{self, ConsoleAction, LineType};
 use crate::display::{self, Framebuffer};
-use crate::rtc;
 use crate::system;
 use crate::window;
 
 const MAX_LINES: usize = 32;
 const MAX_COLS: usize = 64;
-const LINE_HEIGHT: usize = 12;
-const PAD: usize = 10;
-
-#[derive(Copy, Clone, PartialEq)]
-pub enum ConsoleAction {
-    None,
-    OpenExplorer,
-    OpenClipboard,
-}
+const LINE_HEIGHT: usize = 14;
+const PAD: usize = 12;
 
 pub struct Console {
     visible: bool,
@@ -26,6 +19,7 @@ pub struct Console {
     win_h: usize,
     lines: [[u8; MAX_COLS]; MAX_LINES],
     lens: [usize; MAX_LINES],
+    types: [LineType; MAX_LINES],
     count: usize,
     input: [u8; MAX_COLS],
     input_len: usize,
@@ -46,6 +40,7 @@ impl Console {
             win_h: 0,
             lines: [[0u8; MAX_COLS]; MAX_LINES],
             lens: [0usize; MAX_LINES],
+            types: [LineType::Normal; MAX_LINES],
             count: 0,
             input: [0u8; MAX_COLS],
             input_len: 0,
@@ -136,8 +131,29 @@ impl Console {
                     cmd[len] = self.input[i];
                     len += 1;
                 }
+                
+                // Показуємо введену команду
                 self.push_prompt_line(&cmd, len);
-                self.exec_command(&cmd, len);
+                
+                // Виконуємо команду
+                let result = commands::execute_command(&cmd, len, &mut self.rand_state, self.fb_w, self.fb_h);
+                
+                // Обробляємо команду clear окремо
+                let (head, _) = split_first_word(&cmd, len);
+                if eq_ignore_case(head, b"clear") || eq_ignore_case(head, b"cls") {
+                    self.clear();
+                } else {
+                    // Додаємо результати виконання
+                    for i in 0..result.count {
+                        self.push_line_raw(&result.lines[i], result.lens[i], result.types[i]);
+                    }
+                }
+                
+                // Зберігаємо action
+                if result.action != ConsoleAction::None {
+                    self.action = result.action;
+                }
+                
                 self.input_len = 0;
                 self.redraw(fb);
                 true
@@ -164,6 +180,8 @@ impl Console {
     fn push_prompt_line(&mut self, cmd: &[u8; MAX_COLS], len: usize) {
         let mut line = [0u8; MAX_COLS];
         let mut out_len = 0usize;
+        
+        // Символ промпту
         if out_len < MAX_COLS {
             line[out_len] = b'>';
             out_len += 1;
@@ -172,6 +190,8 @@ impl Console {
             line[out_len] = b' ';
             out_len += 1;
         }
+        
+        // Сама команда
         for i in 0..len {
             if out_len >= MAX_COLS {
                 break;
@@ -179,75 +199,8 @@ impl Console {
             line[out_len] = cmd[i];
             out_len += 1;
         }
-        self.push_line_raw(&line, out_len);
-    }
-
-    fn exec_command(&mut self, cmd: &[u8; MAX_COLS], len: usize) {
-        let (head, rest) = split_first_word(cmd, len);
-        if head.len() == 0 {
-            return;
-        }
-
-        if eq_ignore_case(head, b"help") {
-            self.push_line(b"help  clear  cls  echo  ver");
-            self.push_line(b"about  res  whoami  ping");
-            self.push_line(b"time  date  mem  sysinfo");
-            self.push_line(b"rand  explorer  dir  ls");
-            self.push_line(b"clip  copy  paste");
-            self.push_line(b"set  (system params)");
-            self.push_line(b"Try: echo hello");
-        } else if eq_ignore_case(head, b"clear") || eq_ignore_case(head, b"cls") {
-            self.clear();
-        } else if eq_ignore_case(head, b"echo") {
-            self.push_line(rest);
-        } else if eq_ignore_case(head, b"ver") || eq_ignore_case(head, b"version") {
-            self.push_line(b"HouseOS 0.1");
-        } else if eq_ignore_case(head, b"about") {
-            self.push_line(b"HouseOS demo console");
-        } else if eq_ignore_case(head, b"res") || eq_ignore_case(head, b"mode") {
-            self.push_res();
-        } else if eq_ignore_case(head, b"whoami") {
-            self.push_line(b"root");
-        } else if eq_ignore_case(head, b"ping") {
-            self.push_line(b"pong");
-        } else if eq_ignore_case(head, b"time") {
-            self.push_time();
-        } else if eq_ignore_case(head, b"date") {
-            self.push_date();
-        } else if eq_ignore_case(head, b"mem") {
-            self.push_mem();
-        } else if eq_ignore_case(head, b"sysinfo") {
-            self.push_sysinfo();
-        } else if eq_ignore_case(head, b"rand") {
-            self.push_rand();
-        } else if eq_ignore_case(head, b"set") {
-            self.handle_set(rest);
-        } else if eq_ignore_case(head, b"clip") || eq_ignore_case(head, b"clipboard") {
-            self.push_line(b"Opening clipboard...");
-            self.action = ConsoleAction::OpenClipboard;
-        } else if eq_ignore_case(head, b"copy") {
-            if rest.is_empty() {
-                self.push_line(b"usage: copy <text>");
-            } else {
-                clipboard::set(rest);
-                self.push_line(b"copied");
-            }
-        } else if eq_ignore_case(head, b"paste") {
-            let data = clipboard::data();
-            if data.is_empty() {
-                self.push_line(b"(clipboard empty)");
-            } else {
-                self.push_line(data);
-            }
-        } else if eq_ignore_case(head, b"explorer")
-            || eq_ignore_case(head, b"dir")
-            || eq_ignore_case(head, b"ls")
-        {
-            self.push_line(b"Opening explorer...");
-            self.action = ConsoleAction::OpenExplorer;
-        } else {
-            self.push_line(b"Unknown command");
-        }
+        
+        self.push_line_raw(&line, out_len, LineType::Info);
     }
 
     fn clear(&mut self) {
@@ -257,252 +210,44 @@ impl Console {
         }
     }
 
-    fn push_res(&mut self) {
-        let mut buf = [0u8; MAX_COLS];
-        let mut len = 0usize;
-        len += write_u32(&mut buf[len..], self.fb_w as u32);
-        if len < MAX_COLS {
-            buf[len] = b'x';
-            len += 1;
-        }
-        len += write_u32(&mut buf[len..], self.fb_h as u32);
-        self.push_line_raw(&buf, len);
-    }
-
-    fn push_time(&mut self) {
-        if let Some(t) = rtc::read_time() {
-            let settings = system::ui_settings();
-            let mut hour = t.hour;
-            if !settings.clock_24h {
-                if hour == 0 {
-                    hour = 12;
-                } else if hour > 12 {
-                    hour -= 12;
-                }
-            }
-            let mut buf = [0u8; MAX_COLS];
-            let mut len = 0usize;
-            len += write_two(&mut buf[len..], hour);
-            if len < MAX_COLS {
-                buf[len] = b':';
-                len += 1;
-            }
-            len += write_two(&mut buf[len..], t.min);
-            if len < MAX_COLS {
-                buf[len] = b':';
-                len += 1;
-            }
-            len += write_two(&mut buf[len..], t.sec);
-            self.push_line_raw(&buf, len);
-        } else {
-            self.push_line(b"(time unavailable)");
-        }
-    }
-
-    fn push_date(&mut self) {
-        if let Some(t) = rtc::read_time() {
-            let mut buf = [0u8; MAX_COLS];
-            let mut len = 0usize;
-            len += write_u32(&mut buf[len..], t.year as u32);
-            if len < MAX_COLS {
-                buf[len] = b'-';
-                len += 1;
-            }
-            len += write_two(&mut buf[len..], t.month);
-            if len < MAX_COLS {
-                buf[len] = b'-';
-                len += 1;
-            }
-            len += write_two(&mut buf[len..], t.day);
-            self.push_line_raw(&buf, len);
-        } else {
-            self.push_line(b"(date unavailable)");
-        }
-    }
-
-    fn push_mem(&mut self) {
-        let info = system::system_info();
-        let total_mib = info.mem_total_kib / 1024;
-        let avail_mib = info.mem_avail_kib / 1024;
-        let used_mib = total_mib.saturating_sub(avail_mib);
-        self.push_line_num(b"RAM total: ", total_mib, b" MiB");
-        self.push_line_num(b"RAM avail: ", avail_mib, b" MiB");
-        self.push_line_num(b"RAM used:  ", used_mib, b" MiB");
-    }
-
-    fn push_sysinfo(&mut self) {
-        let info = system::system_info();
-        let mut buf = [0u8; MAX_COLS];
-        let mut len = 0usize;
-        len += write_u32(&mut buf[len..], info.fb_w as u32);
-        if len < MAX_COLS {
-            buf[len] = b'x';
-            len += 1;
-        }
-        len += write_u32(&mut buf[len..], info.fb_h as u32);
-        if len < MAX_COLS {
-            buf[len] = b'x';
-            len += 1;
-        }
-        len += write_u32(&mut buf[len..], info.fb_bpp as u32);
-        self.push_line_raw(&buf, len);
-    }
-
-    fn push_rand(&mut self) {
-        self.rand_state = self.rand_state.wrapping_mul(1664525).wrapping_add(1013904223);
-        let mut buf = [0u8; MAX_COLS];
-        let mut len = 0usize;
-        len += write_u32(&mut buf[len..], self.rand_state);
-        self.push_line_raw(&buf, len);
-    }
-
-    fn push_line(&mut self, bytes: &[u8]) {
-        let mut line = [0u8; MAX_COLS];
-        let mut len = 0usize;
-        for &b in bytes {
-            if len >= MAX_COLS {
-                break;
-            }
-            line[len] = b;
-            len += 1;
-        }
-        self.push_line_raw(&line, len);
-    }
-
-    fn push_line_raw(&mut self, line: &[u8; MAX_COLS], len: usize) {
+    fn push_line_raw(&mut self, line: &[u8; MAX_COLS], len: usize, line_type: LineType) {
         if self.count < MAX_LINES {
             self.lines[self.count] = *line;
             self.lens[self.count] = len;
+            self.types[self.count] = line_type;
             self.count += 1;
             return;
         }
+        // Scroll up
         for i in 1..MAX_LINES {
             self.lines[i - 1] = self.lines[i];
             self.lens[i - 1] = self.lens[i];
+            self.types[i - 1] = self.types[i];
         }
         self.lines[MAX_LINES - 1] = *line;
         self.lens[MAX_LINES - 1] = len;
-    }
-
-    fn push_line_num(&mut self, prefix: &[u8], val: u64, suffix: &[u8]) {
-        let mut buf = [0u8; MAX_COLS];
-        let mut len = 0usize;
-        for &b in prefix {
-            if len >= MAX_COLS {
-                break;
-            }
-            buf[len] = b;
-            len += 1;
-        }
-        len += write_u64(&mut buf[len..], val);
-        for &b in suffix {
-            if len >= MAX_COLS {
-                break;
-            }
-            buf[len] = b;
-            len += 1;
-        }
-        self.push_line_raw(&buf, len);
-    }
-
-    fn handle_set(&mut self, rest: &[u8]) {
-        let (key, value) = split_words(rest);
-        if key.is_empty() {
-            self.push_line(b"set clock 24|12");
-            self.push_line(b"set statusbar on|off");
-            self.push_line(b"set accent blue|green|orange|gray");
-            self.push_line(b"set mouse 1|2|3|4");
-            self.push_line(b"set theme dark|light");
-            return;
-        }
-
-        if eq_ignore_case(key, b"clock") {
-            if eq_ignore_case(value, b"24") {
-                system::set_clock_24h(true);
-                self.push_line(b"clock = 24h");
-            } else if eq_ignore_case(value, b"12") {
-                system::set_clock_24h(false);
-                self.push_line(b"clock = 12h");
-            } else {
-                self.push_line(b"usage: set clock 24|12");
-            }
-            return;
-        }
-
-        if eq_ignore_case(key, b"statusbar") {
-            if eq_ignore_case(value, b"on") {
-                system::set_status_bar(true);
-                self.push_line(b"statusbar = on");
-            } else if eq_ignore_case(value, b"off") {
-                system::set_status_bar(false);
-                self.push_line(b"statusbar = off");
-            } else {
-                self.push_line(b"usage: set statusbar on|off");
-            }
-            return;
-        }
-
-        if eq_ignore_case(key, b"accent") {
-            if eq_ignore_case(value, b"blue") {
-                system::set_accent(0x003B6EA5);
-                self.push_line(b"accent = blue");
-            } else if eq_ignore_case(value, b"green") {
-                system::set_accent(0x00358C5C);
-                self.push_line(b"accent = green");
-            } else if eq_ignore_case(value, b"orange") {
-                system::set_accent(0x00C7772A);
-                self.push_line(b"accent = orange");
-            } else if eq_ignore_case(value, b"gray") {
-                system::set_accent(0x006B6B6B);
-                self.push_line(b"accent = gray");
-            } else {
-                self.push_line(b"usage: set accent blue|green|orange|gray");
-            }
-            return;
-        }
-
-        if eq_ignore_case(key, b"mouse") {
-            if value.len() == 1 {
-                let v = value[0];
-                if v >= b'1' && v <= b'4' {
-                    let scale = (v - b'0') as i32;
-                    system::set_mouse_scale(scale);
-                    self.push_line(b"mouse speed updated");
-                    return;
-                }
-            }
-            self.push_line(b"usage: set mouse 1|2|3|4");
-            return;
-        }
-
-        if eq_ignore_case(key, b"theme") {
-            if eq_ignore_case(value, b"dark") {
-                system::set_theme(true);
-                self.push_line(b"theme = dark");
-            } else if eq_ignore_case(value, b"light") {
-                system::set_theme(false);
-                self.push_line(b"theme = light");
-            } else {
-                self.push_line(b"usage: set theme dark|light");
-            }
-            return;
-        }
-
-        self.push_line(b"unknown setting");
+        self.types[MAX_LINES - 1] = line_type;
     }
 
     pub fn redraw(&self, fb: &Framebuffer) {
         if !self.visible {
             return;
         }
+        
         let (x, y, w, h) = self.rect(fb);
         let ui = system::ui_settings();
-        let (bg, input_bg, text) = if ui.dark {
-            (0x00212121, 0x002B2B2B, 0x00E6E6E6)
+        
+        // Кольорова схема
+        let (bg, input_bg, border_color, prompt_color) = if ui.dark {
+            (0x001E1E1E, 0x002D2D2D, 0x00404040, 0x0066B3FF)
         } else {
-            (0x00FFFFFF, 0x00FFFFFF, 0x00111111)
+            (0x00F5F5F5, 0x00FFFFFF, 0x00CCCCCC, 0x002196F3)
         };
-        let chrome = window::draw_window(fb, x, y, w, h, b"Run");
+        
+        // Малюємо вікно з рамкою
+        let chrome = window::draw_window(fb, x, y, w, h, b"Terminal");
+        
+        // Фон вмісту
         display::fill_rect(
             fb,
             chrome.content_x,
@@ -511,11 +256,15 @@ impl Console {
             chrome.content_h,
             bg,
         );
+        
+        // Рамка навколо вмісту
+        draw_border(fb, chrome.content_x, chrome.content_y, chrome.content_w, chrome.content_h, border_color);
 
         let text_x = chrome.content_x + PAD;
         let text_y = chrome.content_y + PAD;
-        let max_visible = (chrome.content_h.saturating_sub(PAD * 2)) / LINE_HEIGHT;
-        let visible_lines = max_visible.saturating_sub(1);
+        let max_visible = (chrome.content_h.saturating_sub(PAD * 3 + LINE_HEIGHT + 8)) / LINE_HEIGHT;
+        let visible_lines = max_visible;
+        
         let start = if self.count > visible_lines {
             self.count - visible_lines
         } else {
@@ -523,10 +272,12 @@ impl Console {
         };
 
         let mut writer = crate::TextWriter::new(*fb);
-        writer.set_color(text);
 
+        // Виводимо історію команд
         let mut row = 0usize;
         for i in start..self.count {
+            let color = get_line_color(self.types[i], ui.dark);
+            writer.set_color(color);
             writer.set_pos(text_x, text_y + row * LINE_HEIGHT);
             let len = self.lens[i];
             if len > 0 {
@@ -535,19 +286,45 @@ impl Console {
             row += 1;
         }
 
-        let input_y = text_y + row * LINE_HEIGHT;
+        // Поле вводу з фоном
+        let input_y = chrome.content_y + chrome.content_h.saturating_sub(LINE_HEIGHT + PAD + 8);
+        let input_h = LINE_HEIGHT + 12;
+        
         display::fill_rect(
             fb,
-            chrome.content_x,
-            input_y.saturating_sub(4),
-            chrome.content_w,
-            LINE_HEIGHT + 6,
+            chrome.content_x + 4,
+            input_y.saturating_sub(6),
+            chrome.content_w.saturating_sub(8),
+            input_h,
             input_bg,
         );
+        
+        // Рамка навколо поля вводу
+        draw_border(
+            fb,
+            chrome.content_x + 4,
+            input_y.saturating_sub(6),
+            chrome.content_w.saturating_sub(8),
+            input_h,
+            prompt_color,
+        );
+        
+        // Промпт і введений текст
+        writer.set_color(prompt_color);
         writer.set_pos(text_x, input_y);
         writer.write_bytes(b"> ");
+        
+        let text_color = if ui.dark { 0x00E6E6E6 } else { 0x00212121 };
+        writer.set_color(text_color);
+        
         if self.input_len > 0 {
             writer.write_bytes(&self.input[..self.input_len]);
+        }
+        
+        // Курсор миготіння (просто вертикальна лінія)
+        let cursor_x = text_x + 16 + (self.input_len * 8);
+        if cursor_x < chrome.content_x + chrome.content_w - PAD {
+            display::fill_rect(fb, cursor_x, input_y + 1, 2, LINE_HEIGHT - 2, prompt_color);
         }
     }
 
@@ -564,8 +341,63 @@ impl Console {
     }
 }
 
-fn split_first_word(buf: &[u8; MAX_COLS], len: usize) -> (&[u8], &[u8]) {
-    let mut i = 0usize;
+fn get_line_color(line_type: LineType, is_dark: bool) -> u32 {
+    match line_type {
+        LineType::Success => {
+            if is_dark {
+                0x0066FF66  // Яскраво-зелений для темної теми
+            } else {
+                0x00008800  // Темно-зелений для світлої теми
+            }
+        }
+        LineType::Error => {
+            if is_dark {
+                0x00FF6666  // Яскраво-червоний для темної теми
+            } else {
+                0x00CC0000  // Темно-червоний для світлої теми
+            }
+        }
+        LineType::Info => {
+            if is_dark {
+                0x0066B3FF  // Яскраво-синій для темної теми
+            } else {
+                0x002196F3  // Синій для світлої теми
+            }
+        }
+        LineType::Normal => {
+            if is_dark {
+                0x00E6E6E6  // Світлий текст для темної теми
+            } else {
+                0x00212121  // Темний текст для світлої теми
+            }
+        }
+    }
+}
+
+fn draw_border(fb: &Framebuffer, x: usize, y: usize, w: usize, h: usize, color: u32) {
+    // Верхня лінія
+    display::fill_rect(fb, x, y, w, 1, color);
+    // Нижня лінія
+    display::fill_rect(fb, x, y + h.saturating_sub(1), w, 1, color);
+    // Ліва лінія
+    display::fill_rect(fb, x, y, 1, h, color);
+    // Права лінія
+    display::fill_rect(fb, x + w.saturating_sub(1), y, 1, h, color);
+}
+
+fn calc_rect(fb: &Framebuffer) -> (usize, usize, usize, usize) {
+    let w = (fb.width * 3) / 5;  // 60% ширини екрану
+    let h = (fb.height * 2) / 3; // 66% висоти екрану
+    if w == 0 || h == 0 {
+        return (0, 0, 0, 0);
+    }
+    let x = (fb.width - w) / 2;
+    let y = (fb.height - h) / 2;
+    (x, y, w, h)
+}
+
+fn split_first_word(buf: &[u8], len: usize) -> (&[u8], &[u8]) {
+    let mut i = 0;
     while i < len && buf[i] == b' ' {
         i += 1;
     }
@@ -578,22 +410,6 @@ fn split_first_word(buf: &[u8; MAX_COLS], len: usize) -> (&[u8], &[u8]) {
         i += 1;
     }
     (&buf[start..end], &buf[i..len])
-}
-
-fn split_words(rest: &[u8]) -> (&[u8], &[u8]) {
-    let mut i = 0usize;
-    while i < rest.len() && rest[i] == b' ' {
-        i += 1;
-    }
-    let start = i;
-    while i < rest.len() && rest[i] != b' ' {
-        i += 1;
-    }
-    let end = i;
-    while i < rest.len() && rest[i] == b' ' {
-        i += 1;
-    }
-    (&rest[start..end], &rest[i..])
 }
 
 fn eq_ignore_case(a: &[u8], b: &[u8]) -> bool {
@@ -614,73 +430,4 @@ fn eq_ignore_case(a: &[u8], b: &[u8]) -> bool {
         }
     }
     true
-}
-
-fn calc_rect(fb: &Framebuffer) -> (usize, usize, usize, usize) {
-    let w = fb.width / 2;
-    let h = fb.height / 2;
-    if w == 0 || h == 0 {
-        return (0, 0, 0, 0);
-    }
-    let x = (fb.width - w) / 2;
-    let y = (fb.height - h) / 2;
-    (x, y, w, h)
-}
-
-
-fn write_u32(buf: &mut [u8], mut val: u32) -> usize {
-    if buf.is_empty() {
-        return 0;
-    }
-    if val == 0 {
-        buf[0] = b'0';
-        return 1;
-    }
-    let mut tmp = [0u8; 10];
-    let mut n = 0usize;
-    while val > 0 && n < tmp.len() {
-        tmp[n] = (val % 10) as u8;
-        val /= 10;
-        n += 1;
-    }
-    let mut out = 0usize;
-    while n > 0 && out < buf.len() {
-        n -= 1;
-        buf[out] = b'0' + tmp[n];
-        out += 1;
-    }
-    out
-}
-
-fn write_u64(buf: &mut [u8], mut val: u64) -> usize {
-    if buf.is_empty() {
-        return 0;
-    }
-    if val == 0 {
-        buf[0] = b'0';
-        return 1;
-    }
-    let mut tmp = [0u8; 20];
-    let mut n = 0usize;
-    while val > 0 && n < tmp.len() {
-        tmp[n] = (val % 10) as u8;
-        val /= 10;
-        n += 1;
-    }
-    let mut out = 0usize;
-    while n > 0 && out < buf.len() {
-        n -= 1;
-        buf[out] = b'0' + tmp[n];
-        out += 1;
-    }
-    out
-}
-
-fn write_two(buf: &mut [u8], val: u8) -> usize {
-    if buf.len() < 2 {
-        return 0;
-    }
-    buf[0] = b'0' + (val / 10) as u8;
-    buf[1] = b'0' + (val % 10) as u8;
-    2
 }

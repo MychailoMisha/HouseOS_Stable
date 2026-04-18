@@ -172,70 +172,79 @@ impl ClipboardWindow {
         let accent = ui.accent;
         let is_dark = ui.dark;
 
-        // Акриловий фон
-        draw_acrylic_surface(fb, x, y, w, h, is_dark);
-
-        // Тонка рамка
-        let border_color = if is_dark { 0x00404040 } else { 0x00C0C0C0 };
-        display::fill_rect(fb, x, y, w, 1, border_color);
-        display::fill_rect(fb, x, y + h.saturating_sub(1), w, 1, border_color);
-        display::fill_rect(fb, x, y, 1, h, border_color);
-        display::fill_rect(fb, x + w.saturating_sub(1), y, 1, h, border_color);
-
-        // Заголовок у стилі Windows 10
-        let header_bg = if is_dark { 0x00333333 } else { 0x00F3F3F3 };
-        display::fill_rect(fb, x + 1, y + 1, w.saturating_sub(2), window::HEADER_H, header_bg);
-        // Акцентна лінія під заголовком
-        display::fill_rect(fb, x + 1, y + window::HEADER_H - 1, w.saturating_sub(2), 2, accent);
+        let _chrome = window::draw_window(fb, x, y, w, h, b"Clipboard");
 
         let mut writer = crate::TextWriter::new(*fb);
-        let text_color = if is_dark { 0x00FFFFFF } else { 0x00000000 };
-        writer.set_color(text_color);
-        writer.set_pos(x + PAD, y + 8);
-        writer.write_bytes(b"Clipboard");
+        let text_color = if is_dark { 0x00F2F5F8 } else { 0x00121B29 };
+        let detail_color = if is_dark { 0x00B7C0CC } else { 0x004D5D72 };
 
-        // Кнопка закриття (X)
-        let close = window::close_rect(x, y, w);
-        display::fill_rect(fb, close.0, close.1, close.2, close.3, 0x00E81123);
-        writer.set_color(0x00FFFFFF);
-        writer.set_pos(close.0 + 4, close.1 + 3);
-        writer.write_bytes(b"X");
-
-        // Область вмісту (тіло)
         let body_y = y + window::HEADER_H + 1;
         let body_h = h.saturating_sub(window::HEADER_H + 2);
-        let content_bg = if is_dark { 0x801C1C1C } else { 0x80FFFFFF };
-        display::fill_rect(fb, x + 1, body_y, w.saturating_sub(2), body_h, content_bg);
+        fill_vertical_gradient(
+            fb,
+            x + 1,
+            body_y,
+            w.saturating_sub(2),
+            body_h,
+            if is_dark { 0x001E1E1E } else { 0x00FFFFFF },
+            if is_dark { 0x00181818 } else { 0x00F7FAFF },
+        );
 
-        // Кнопка очищення
         let clear_x = x + w - PAD - CLEAR_BTN_W;
         let clear_y = body_y + PAD;
-        let clear_bg = if is_dark { 0x00404040 } else { 0x00D0D0D0 };
-        display::fill_rect(fb, clear_x, clear_y, CLEAR_BTN_W, CLEAR_BTN_H, clear_bg);
-        display::fill_rect(fb, clear_x, clear_y, CLEAR_BTN_W, 1, border_color);
-        display::fill_rect(fb, clear_x, clear_y + CLEAR_BTN_H - 1, CLEAR_BTN_W, 1, border_color);
+        fill_vertical_gradient(
+            fb,
+            clear_x,
+            clear_y,
+            CLEAR_BTN_W,
+            CLEAR_BTN_H,
+            if is_dark { 0x00494848 } else { 0x00EAF0F8 },
+            if is_dark { 0x003F3F3F } else { 0x00D8E2EE },
+        );
+        let button_border = if is_dark { 0x004D4D4D } else { 0x00C4D4E8 };
+        display::fill_rect(fb, clear_x, clear_y, CLEAR_BTN_W, 1, button_border);
+        display::fill_rect(
+            fb,
+            clear_x,
+            clear_y + CLEAR_BTN_H.saturating_sub(1),
+            CLEAR_BTN_W,
+            1,
+            button_border,
+        );
         writer.set_color(text_color);
         writer.set_pos(clear_x + 8, clear_y + 5);
         writer.write_bytes(b"Clear");
 
-        // Смуга прокрутки
         let scroll_x = x + w.saturating_sub(PAD + SCROLL_W);
         let scroll_y = body_y + PAD;
         let scroll_h = body_h.saturating_sub(PAD * 2);
-        let scroll_bg = if is_dark { 0x00323232 } else { 0x00E0E0E0 };
+        let scroll_bg = if is_dark { 0x00323232 } else { 0x00E1EAF5 };
         display::fill_rect(fb, scroll_x, scroll_y, SCROLL_W, scroll_h, scroll_bg);
 
-        // Кнопки вгору/вниз
-        let btn_color = if is_dark { 0x00505050 } else { 0x00C0C0C0 };
-        display::fill_rect(fb, scroll_x, scroll_y, SCROLL_W, BTN_H, btn_color);
-        display::fill_rect(fb, scroll_x, scroll_y + scroll_h.saturating_sub(BTN_H), SCROLL_W, BTN_H, btn_color);
-        writer.set_color(text_color);
+        fill_vertical_gradient(
+            fb,
+            scroll_x,
+            scroll_y,
+            SCROLL_W,
+            BTN_H,
+            if is_dark { 0x00484848 } else { 0x00D8E2EE },
+            if is_dark { 0x003E3E3E } else { 0x00CBD8E8 },
+        );
+        fill_vertical_gradient(
+            fb,
+            scroll_x,
+            scroll_y + scroll_h.saturating_sub(BTN_H),
+            SCROLL_W,
+            BTN_H,
+            if is_dark { 0x00484848 } else { 0x00D8E2EE },
+            if is_dark { 0x003E3E3E } else { 0x00CBD8E8 },
+        );
+        writer.set_color(detail_color);
         writer.set_pos(scroll_x + 4, scroll_y + 3);
         writer.write_bytes(b"^");
         writer.set_pos(scroll_x + 4, scroll_y + scroll_h.saturating_sub(BTN_H - 3));
         writer.write_bytes(b"v");
 
-        // Повзунок смуги прокрутки
         let data = data();
         let total_lines = count_lines(data);
         let max_lines = self.max_lines(fb);
@@ -244,23 +253,23 @@ impl ClipboardWindow {
             let thumb_h = ((max_lines as f32 / total_lines as f32) * (scroll_h - 2 * BTN_H) as f32) as usize;
             let thumb_h = thumb_h.max(16);
             let track_h = scroll_h - 2 * BTN_H;
-            let thumb_y = scroll_y + BTN_H + ((self.scroll as f32 / max_scroll as f32) * (track_h - thumb_h) as f32) as usize;
-            let thumb_color = if is_dark { 0x00808080 } else { 0x00A0A0A0 };
+            let thumb_y =
+                scroll_y + BTN_H + ((self.scroll as f32 / max_scroll as f32) * (track_h - thumb_h) as f32) as usize;
+            let thumb_color = blend_rgb(accent, if is_dark { 0x00BFC7D3 } else { 0x00FFFFFF }, if is_dark { 20 } else { 40 });
             display::fill_rect(fb, scroll_x, thumb_y, SCROLL_W, thumb_h, thumb_color);
         }
 
-        // Відображення тексту
         let text_x = x + PAD;
         let text_y = body_y + PAD + CLEAR_BTN_H + PAD;
         if data.is_empty() {
-            writer.set_color(text_color);
+            writer.set_color(detail_color);
             writer.set_pos(text_x, text_y);
             writer.write_bytes(b"(empty)");
         } else {
+            writer.set_color(text_color);
             draw_lines(&mut writer, data, self.scroll, max_lines, text_x, text_y);
         }
     }
-
     pub fn rect(&self, fb: &Framebuffer) -> (usize, usize, usize, usize) {
         if self.win_w == 0 || self.win_h == 0 {
             return calc_rect(fb);
@@ -337,7 +346,56 @@ fn hit(px: usize, py: usize, x: usize, y: usize, w: usize, h: usize) -> bool {
     px >= x && py >= y && px < x + w && py < y + h
 }
 
-fn draw_acrylic_surface(fb: &Framebuffer, x: usize, y: usize, w: usize, h: usize, is_dark: bool) {
-    let base = if is_dark { 0x801C1C1C } else { 0x80F0F0F0 };
-    display::fill_rect(fb, x, y, w, h, base);
+fn fill_vertical_gradient(
+    fb: &Framebuffer,
+    x: usize,
+    y: usize,
+    w: usize,
+    h: usize,
+    top: u32,
+    bottom: u32,
+) {
+    if w == 0 || h == 0 {
+        return;
+    }
+    if h == 1 {
+        display::fill_rect(fb, x, y, w, 1, top);
+        return;
+    }
+    let den = (h - 1) as u32;
+    for row in 0..h {
+        let c = lerp_rgb(top, bottom, row as u32, den);
+        display::fill_rect(fb, x, y + row, w, 1, c);
+    }
+}
+
+fn lerp_rgb(a: u32, b: u32, num: u32, den: u32) -> u32 {
+    if den == 0 {
+        return a;
+    }
+    let ar = ((a >> 16) & 0xFF) as u32;
+    let ag = ((a >> 8) & 0xFF) as u32;
+    let ab = (a & 0xFF) as u32;
+    let br = ((b >> 16) & 0xFF) as u32;
+    let bg = ((b >> 8) & 0xFF) as u32;
+    let bb = (b & 0xFF) as u32;
+    let r = (ar * (den - num) + br * num) / den;
+    let g = (ag * (den - num) + bg * num) / den;
+    let b = (ab * (den - num) + bb * num) / den;
+    (r << 16) | (g << 8) | b
+}
+
+fn blend_rgb(base: u32, mix: u32, mix_strength: u8) -> u32 {
+    let s = mix_strength as u32;
+    let inv = 255u32.saturating_sub(s);
+    let br = (base >> 16) & 0xFF;
+    let bg = (base >> 8) & 0xFF;
+    let bb = base & 0xFF;
+    let mr = (mix >> 16) & 0xFF;
+    let mg = (mix >> 8) & 0xFF;
+    let mb = mix & 0xFF;
+    let r = (br * inv + mr * s) / 255;
+    let g = (bg * inv + mg * s) / 255;
+    let b = (bb * inv + mb * s) / 255;
+    (r << 16) | (g << 8) | b
 }

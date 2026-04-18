@@ -27,7 +27,7 @@ static mut SYSINFO: SystemInfo = SystemInfo {
 static mut UI: UiSettings = UiSettings {
     status_bar: true,
     clock_24h: true,
-    accent: 0x000078D4,
+    accent: 0x003A8FE5,
     mouse_scale: 1,
     dark: false,
 };

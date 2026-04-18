@@ -282,61 +282,70 @@ impl Explorer {
         let accent = ui.accent;
         let is_dark = ui.dark;
 
-        // Акриловий фон
-        draw_acrylic_surface(fb, x, y, w, h, is_dark);
-
-        // Тонка рамка
-        let border_color = if is_dark { 0x00404040 } else { 0x00C0C0C0 };
-        display::fill_rect(fb, x, y, w, 1, border_color);
-        display::fill_rect(fb, x, y + h.saturating_sub(1), w, 1, border_color);
-        display::fill_rect(fb, x, y, 1, h, border_color);
-        display::fill_rect(fb, x + w.saturating_sub(1), y, 1, h, border_color);
-
-        // Заголовок
-        let header_bg = if is_dark { 0x00333333 } else { 0x00F3F3F3 };
-        display::fill_rect(fb, x + 1, y + 1, w.saturating_sub(2), window::HEADER_H, header_bg);
-        display::fill_rect(fb, x + 1, y + window::HEADER_H - 1, w.saturating_sub(2), 2, accent);
-
+        let title: &[u8] = match self.view {
+            ExplorerView::Root => b"File Explorer",
+            ExplorerView::Bin => b"Recycle Bin",
+        };
+        let chrome = window::draw_window(fb, x, y, w, h, title);
         let mut writer = crate::TextWriter::new(*fb);
-        let text_color = if is_dark { 0x00FFFFFF } else { 0x00000000 };
-        writer.set_color(text_color);
-        writer.set_pos(x + PAD, y + 8);
-        match self.view {
-            ExplorerView::Root => writer.write_bytes(b"File Explorer"),
-            ExplorerView::Bin => writer.write_bytes(b"Recycle Bin"),
-        }
+        let text_color = if is_dark { 0x00F3F5F8 } else { 0x00121B29 };
 
-        // Кнопка закриття
-        let close = window::close_rect(x, y, w);
-        display::fill_rect(fb, close.0, close.1, close.2, close.3, 0x00E81123);
-        writer.set_color(0x00FFFFFF);
-        writer.set_pos(close.0 + 4, close.1 + 3);
-        writer.write_bytes(b"X");
+        fill_vertical_gradient(
+            fb,
+            chrome.content_x,
+            chrome.content_y,
+            chrome.content_w,
+            chrome.content_h,
+            if is_dark { 0x001E1E1E } else { 0x00FFFFFF },
+            if is_dark { 0x00181818 } else { 0x00F7FAFF },
+        );
 
-        // Область вмісту
-        let content_x = x + 1;
-        let content_y = y + window::HEADER_H + 1;
-        let content_w = w.saturating_sub(2);
-        let content_h = h.saturating_sub(window::HEADER_H + 2);
-        let content_bg = if is_dark { 0x801C1C1C } else { 0x80FFFFFF };
-        display::fill_rect(fb, content_x, content_y, content_w, content_h, content_bg);
+        let layout = self.layout(
+            fb,
+            (
+                chrome.content_x,
+                chrome.content_y,
+                chrome.content_w,
+                chrome.content_h,
+            ),
+        );
 
-        let layout = self.layout(fb, (content_x, content_y, content_w, content_h));
+        fill_vertical_gradient(
+            fb,
+            layout.content_x,
+            layout.toolbar_y,
+            layout.content_w,
+            TOOLBAR_H,
+            if is_dark { 0x00313131 } else { 0x00F8FBFF },
+            if is_dark { 0x002A2A2A } else { 0x00EDF3FC },
+        );
+        display::fill_rect(
+            fb,
+            layout.content_x,
+            layout.toolbar_y + TOOLBAR_H.saturating_sub(1),
+            layout.content_w,
+            1,
+            if is_dark { 0x00444444 } else { 0x00D6E2F0 },
+        );
 
-        // Тулбар
-        let toolbar_bg = if is_dark { 0x00333333 } else { 0x00F0F0F0 };
-        display::fill_rect(fb, layout.content_x, layout.toolbar_y, layout.content_w, TOOLBAR_H, toolbar_bg);
-        // Кнопки навігації (заглушки)
         let btn_w = 60;
         let btn_h = TOOLBAR_H - 4;
         let btn_y = layout.toolbar_y + 2;
         let btn_x = layout.content_x + PAD;
-        display::fill_rect(fb, btn_x, btn_y, btn_w, btn_h, if is_dark { 0x00505050 } else { 0x00D0D0D0 });
+        fill_vertical_gradient(
+            fb,
+            btn_x,
+            btn_y,
+            btn_w,
+            btn_h,
+            if is_dark { 0x00494848 } else { 0x00EAF0F8 },
+            if is_dark { 0x003F3F3F } else { 0x00D8E2EE },
+        );
         writer.set_color(text_color);
         writer.set_pos(btn_x + 8, btn_y + 5);
         writer.write_bytes(b"Back");
-        // Шлях
-        writer.set_color(if is_dark { 0x00AAAAAA } else { 0x00666666 });
+
+        writer.set_color(if is_dark { 0x00B7C0CC } else { 0x004D5D72 });
         writer.set_pos(btn_x + btn_w + PAD, layout.toolbar_y + 6);
         if self.view == ExplorerView::Bin {
             writer.write_bytes(b"Recycle Bin");
@@ -353,37 +362,49 @@ impl Explorer {
             }
         }
 
-        // Бічна панель
-        let sidebar_bg = if is_dark { 0x00262626 } else { 0x00FAFAFA };
-        display::fill_rect(fb, layout.content_x, layout.body_y, layout.sidebar_w, layout.body_h, sidebar_bg);
-        writer.set_color(if is_dark { 0x00AAAAAA } else { 0x00666666 });
+        fill_vertical_gradient(
+            fb,
+            layout.content_x,
+            layout.body_y,
+            layout.sidebar_w,
+            layout.body_h,
+            if is_dark { 0x00252525 } else { 0x00F9FBFF },
+            if is_dark { 0x00212121 } else { 0x00EEF4FC },
+        );
+        writer.set_color(if is_dark { 0x00B7C0CC } else { 0x004D5D72 });
         writer.set_pos(layout.content_x + PAD, layout.body_y + PAD);
         writer.write_bytes(b"Places");
 
         let item_y = layout.body_y + PAD + LINE_HEIGHT + 4;
         draw_sidebar_item(
-            fb, &mut writer,
-            layout.content_x + PAD, item_y,
+            fb,
+            &mut writer,
+            layout.content_x + PAD,
+            item_y,
             layout.sidebar_w.saturating_sub(PAD * 2),
-            b"Files", self.view == ExplorerView::Root,
-            accent, text_color,
+            b"Files",
+            self.view == ExplorerView::Root,
+            accent,
+            text_color,
         );
         draw_sidebar_item(
-            fb, &mut writer,
-            layout.content_x + PAD, item_y + LINE_HEIGHT,
+            fb,
+            &mut writer,
+            layout.content_x + PAD,
+            item_y + LINE_HEIGHT,
             layout.sidebar_w.saturating_sub(PAD * 2),
-            b"Recycle Bin", self.view == ExplorerView::Bin,
-            accent, text_color,
+            b"Recycle Bin",
+            self.view == ExplorerView::Bin,
+            accent,
+            text_color,
         );
 
-        // Заголовки списку
-        writer.set_color(if is_dark { 0x00AAAAAA } else { 0x00666666 });
+        writer.set_color(if is_dark { 0x00B7C0CC } else { 0x004D5D72 });
         writer.set_pos(layout.list_x, layout.list_header_y);
         writer.write_bytes(b"Name");
         writer.set_pos(layout.list_x + layout.list_w.saturating_sub(60), layout.list_header_y);
         writer.write_bytes(b"Size");
 
-        // Оновлення записів
         if self.view == ExplorerView::Root {
             let fs_img = self.fs_img;
             if let Some(fs) = fs_img.and_then(Fat32::new) {
@@ -400,17 +421,15 @@ impl Explorer {
                     self.visible_count = (self.entry_count - self.scroll_offset).min(layout.max_lines);
                 }
 
-                // Малювання списку
                 for i in 0..self.visible_count {
                     let entry_idx = self.scroll_offset + i;
                     let entry = self.entries[entry_idx];
                     let row_y = layout.list_start_y + i * LINE_HEIGHT;
 
-                    // Фон рядка
                     let row_bg = if Some(entry_idx) == self.selected_entry {
-                        if is_dark { 0x403366FF } else { 0x40CCE0FF } // акцентне виділення
+                        if is_dark { 0x40284A7A } else { 0x40D7E9FF }
                     } else if (i & 1) == 1 {
-                        if is_dark { 0x00333333 } else { 0x00F5F5F5 }
+                        if is_dark { 0x002E2E2E } else { 0x00F6FAFF }
                     } else {
                         0x00000000
                     };
@@ -436,7 +455,7 @@ impl Explorer {
                         let mut buf = [0u8; 12];
                         let len = write_u32(&mut buf, entry.size);
                         if len > 0 {
-                            writer.set_color(if is_dark { 0x00AAAAAA } else { 0x00666666 });
+                            writer.set_color(if is_dark { 0x00B7C0CC } else { 0x004D5D72 });
                             let size_x = layout.list_x + layout.list_w.saturating_sub(len * 8 + 8);
                             writer.set_pos(size_x, row_y + 3);
                             writer.write_bytes(&buf[..len]);
@@ -444,39 +463,49 @@ impl Explorer {
                     }
                 }
 
-                // Смуга прокрутки
                 let max_scroll = self.entry_count.saturating_sub(layout.max_lines);
                 if max_scroll > 0 {
                     let scroll_x = layout.list_x + layout.list_w + 4;
                     let scroll_y = layout.list_start_y;
                     let scroll_h = layout.list_h;
-                    // Трек
-                    display::fill_rect(fb, scroll_x, scroll_y, SCROLL_W, scroll_h, if is_dark { 0x00323232 } else { 0x00E0E0E0 });
-                    // Повзунок
+                    display::fill_rect(
+                        fb,
+                        scroll_x,
+                        scroll_y,
+                        SCROLL_W,
+                        scroll_h,
+                        if is_dark { 0x00323232 } else { 0x00E1EAF5 },
+                    );
                     let thumb_h = ((layout.max_lines as f32 / self.entry_count as f32) * scroll_h as f32) as usize;
                     let thumb_h = thumb_h.max(16);
-                    let thumb_y = scroll_y + ((self.scroll_offset as f32 / max_scroll as f32) * (scroll_h - thumb_h) as f32) as usize;
-                    display::fill_rect(fb, scroll_x, thumb_y, SCROLL_W, thumb_h, if is_dark { 0x00808080 } else { 0x00A0A0A0 });
+                    let thumb_y =
+                        scroll_y + ((self.scroll_offset as f32 / max_scroll as f32) * (scroll_h - thumb_h) as f32) as usize;
+                    display::fill_rect(
+                        fb,
+                        scroll_x,
+                        thumb_y,
+                        SCROLL_W,
+                        thumb_h,
+                        if is_dark { 0x00777F8A } else { 0x0093A9C0 },
+                    );
                 }
 
                 if self.entry_count == 0 {
-                    writer.set_color(if is_dark { 0x00AAAAAA } else { 0x00666666 });
+                    writer.set_color(if is_dark { 0x00B7C0CC } else { 0x004D5D72 });
                     writer.set_pos(layout.list_x, layout.list_start_y + 4);
                     writer.write_bytes(b"(empty folder)");
                 }
             } else {
-                writer.set_color(if is_dark { 0x00AAAAAA } else { 0x00666666 });
+                writer.set_color(if is_dark { 0x00B7C0CC } else { 0x004D5D72 });
                 writer.set_pos(layout.list_x, layout.list_start_y + 4);
                 writer.write_bytes(b"(no FAT32 image mounted)");
             }
         } else {
-            // Recycle Bin view (заглушка)
-            writer.set_color(if is_dark { 0x00AAAAAA } else { 0x00666666 });
+            writer.set_color(if is_dark { 0x00B7C0CC } else { 0x004D5D72 });
             writer.set_pos(layout.list_x, layout.list_start_y + 4);
             writer.write_bytes(b"Recycle Bin is empty.");
         }
     }
-
     fn rebuild_entries(&mut self, fs: &Fat32, max_lines: usize) {
         self.entry_count = 0;
         self.visible_count = 0;
@@ -568,7 +597,8 @@ fn draw_sidebar_item(
     text: u32,
 ) {
     if active {
-        display::fill_rect(fb, x.saturating_sub(4), y.saturating_sub(2), w + 8, LINE_HEIGHT, accent);
+        let active_bg = blend_rgb(accent, 0x00FFFFFF, 34);
+        display::fill_rect(fb, x.saturating_sub(4), y.saturating_sub(2), w + 8, LINE_HEIGHT, active_bg);
         writer.set_color(0x00FFFFFF);
     } else {
         writer.set_color(text);
@@ -613,7 +643,56 @@ fn hit(px: usize, py: usize, x: usize, y: usize, w: usize, h: usize) -> bool {
     px >= x && py >= y && px < x + w && py < y + h
 }
 
-fn draw_acrylic_surface(fb: &Framebuffer, x: usize, y: usize, w: usize, h: usize, is_dark: bool) {
-    let base = if is_dark { 0x801C1C1C } else { 0x80F0F0F0 };
-    display::fill_rect(fb, x, y, w, h, base);
+fn fill_vertical_gradient(
+    fb: &Framebuffer,
+    x: usize,
+    y: usize,
+    w: usize,
+    h: usize,
+    top: u32,
+    bottom: u32,
+) {
+    if w == 0 || h == 0 {
+        return;
+    }
+    if h == 1 {
+        display::fill_rect(fb, x, y, w, 1, top);
+        return;
+    }
+    let den = (h - 1) as u32;
+    for row in 0..h {
+        let c = lerp_rgb(top, bottom, row as u32, den);
+        display::fill_rect(fb, x, y + row, w, 1, c);
+    }
+}
+
+fn lerp_rgb(a: u32, b: u32, num: u32, den: u32) -> u32 {
+    if den == 0 {
+        return a;
+    }
+    let ar = ((a >> 16) & 0xFF) as u32;
+    let ag = ((a >> 8) & 0xFF) as u32;
+    let ab = (a & 0xFF) as u32;
+    let br = ((b >> 16) & 0xFF) as u32;
+    let bg = ((b >> 8) & 0xFF) as u32;
+    let bb = (b & 0xFF) as u32;
+    let r = (ar * (den - num) + br * num) / den;
+    let g = (ag * (den - num) + bg * num) / den;
+    let b = (ab * (den - num) + bb * num) / den;
+    (r << 16) | (g << 8) | b
+}
+
+fn blend_rgb(base: u32, mix: u32, mix_strength: u8) -> u32 {
+    let s = mix_strength as u32;
+    let inv = 255u32.saturating_sub(s);
+    let br = (base >> 16) & 0xFF;
+    let bg = (base >> 8) & 0xFF;
+    let bb = base & 0xFF;
+    let mr = (mix >> 16) & 0xFF;
+    let mg = (mix >> 8) & 0xFF;
+    let mb = mix & 0xFF;
+    let r = (br * inv + mr * s) / 255;
+    let g = (bg * inv + mg * s) / 255;
+    let b = (bb * inv + mb * s) / 255;
+    (r << 16) | (g << 8) | b
 }

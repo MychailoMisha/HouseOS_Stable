@@ -4,6 +4,8 @@
 
 mod cursor;
 mod console;
+mod commands;  // ДОДАНО - новий модуль для команд
+mod calculator;
 mod clipboard;
 mod desktop;
 mod explorer;
@@ -311,7 +313,7 @@ fn kernel_main(
 
     // Ініціалізація драйверів
     let _usb = drivers::usb::init();
-    drivers::battery_init();  // ДОДАНО - ініціалізація батареї
+    drivers::battery_init();
 
     let cursor_raw = if let Some(initrd_mod) = initrd {
         find_tar_file(
