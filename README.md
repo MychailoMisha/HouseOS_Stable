@@ -1,61 +1,79 @@
-<h1 align="center">🚀 HouseOS Stable</h1>
+<h1 align="center">🚀 HouseOS 3.4 Stable</h1>
 
 <p align="center">
-  <b>Experimental Operating System built with Assembly & Rust</b>
+  Lightweight Experimental Operating System built with Assembly & Rust
 </p>
 
 <p align="center">
-  <a href="https://github.com/MychailoMisha/HouseOS_Stable/blob/main/houseos.iso">
-    <img src="https://img.shields.io/badge/Download-ISO-blue?style=for-the-badge&logo=linux">
-  </a>
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/OS-HouseOS-4c1?style=for-the-badge">
-  <img src="https://img.shields.io/badge/Type-Experimental-red?style=for-the-badge">
-  <img src="https://img.shields.io/badge/Kernel-Custom-black?style=for-the-badge">
+  <img src="https://img.shields.io/badge/Version-3.4_Stable-blue?style=for-the-badge">
   <img src="https://img.shields.io/badge/Status-Active-yellow?style=for-the-badge">
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/Rust-77.4%25-orange?style=for-the-badge&logo=rust">
-  <img src="https://img.shields.io/badge/Assembly-5.9%25-lightgrey?style=for-the-badge">
-  <img src="https://img.shields.io/badge/PowerShell-16.5%25-blue?style=for-the-badge&logo=powershell">
-  <img src="https://img.shields.io/badge/LinkerScript-0.2%25-important?style=for-the-badge">
+  <img src="https://img.shields.io/badge/Kernel-Custom-black?style=for-the-badge">
+  <img src="https://img.shields.io/badge/Type-Experimental-red?style=for-the-badge">
 </p>
 
 ---
 
-## 🧠 Overview
+## 🧠 About HouseOS
 
-HouseOS is an **experimental operating system** designed to explore low-level system architecture, performance, and full user control.
+**HouseOS** is an experimental operating system built completely from scratch using **Assembly and Rust**.  
+It focuses on performance, simplicity, and full control over the system without unnecessary overhead.
 
-Built from scratch with a custom kernel, graphical interface, and file system.
+The OS includes a custom kernel, graphical interface (framebuffer-based), and core system components.  
+The project is designed for learning low-level development, OS architecture, and optimization techniques.  
 
----
-
-## ⚙️ Core Features
-
-- 🔐 Full system control (Root access)
-- ⚡ High performance & low-level optimization
-- 🧠 Experimental architecture design
-- 🖥️ Custom GUI environment
-- 📂 Custom file system
+HouseOS aims to be **fast, lightweight, and minimal**, while still evolving into a more complete system.
 
 ---
 
-## 💻 Technology Stack
+## 🚀 HouseOS 3.4 Stable
 
-<div align="center">
+Version **3.4 Stable** is a major improvement in both design and system performance.
 
-| Component | Technology |
-|----------|-----------|
-| Kernel   | Assembly + Rust |
-| System   | Low-level architecture |
-| Scripts  | PowerShell |
-| Build    | Linker Script |
+- 🎨 Improved UI design with cleaner layout and rounded corners  
+- ⚡ Optimized rendering system (less redraw = better performance)  
+- 🧠 Enhanced system stability  
+- 🧹 Improved optimizer for better resource management  
+- 🧮 Added built-in Calculator  
+- 🧾 Redesigned console (commands separated from core system)  
+- 🗑️ Removed unnecessary commands  
+- 🚀 Overall performance improvements  
 
-</div>
+This version makes HouseOS more stable, cleaner, and closer to a real desktop OS experience.
+
+---
+
+## 🧾 Previous Versions
+
+### 🔹 HouseOS 3.3 Stable
+- First major UI improvements  
+- Initial system optimizations  
+- Base for future design and performance upgrades  
+
+### 🔹 Early 3.x Versions
+- Core system architecture development  
+- Kernel and GUI experiments  
+- Basic functionality and testing stage  
+
+---
+
+## 💻 Running on Real Hardware
+
+HouseOS can run not only in emulators but also on real hardware.
+
+### ✔️ Supported:
+- Boot via BIOS / Legacy Boot  
+- Boot from USB (ISO image)  
+
+### ⚠️ Limitations:
+- Limited driver support (GPU, disk, USB)  
+- Possible kernel panic on some systems  
+- Hardware compatibility is not guaranteed  
+
+👉 Recommended workflow:
+1. Test in **QEMU / VirtualBox**
+2. Then try on real hardware
+
+Future updates aim to improve hardware compatibility and stability.
 
 ---
 
@@ -69,30 +87,8 @@ Built from scratch with a custom kernel, graphical interface, and file system.
 
 ---
 
-## 🚧 Project Status
-
-<div align="center">
-
-⚠️ This project is under active development  
-Features may change, break, or be incomplete  
-
-</div>
-
----
-
-## 🔽 Additional Info
-
-<details>
-<summary>Click to expand</summary>
-
-- Experimental OS project  
-- Focused on learning and system-level development  
-- Not intended for production use  
-
-</details>
-
----
+## ⚡ Philosophy
 
 <p align="center">
-  ⚡ Built for experimentation • Not for production
+  Fast • Lightweight • Experimental • Full Control
 </p>
