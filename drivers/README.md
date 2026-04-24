@@ -14,6 +14,7 @@ Included
 - interrupts/pic8259.rs: PIC remap and masking
 - timer/pit8253.rs: PIT init (timer)
 - serial/uart16550.rs: COM1 init and write
+- net/mod.rs: PCI NIC discovery + basic RTL8139 hardware init (I/O, bus-master, RX/TX enable, MAC read)
 
 Integration (suggested)
 - Add a drivers module to the kernel and include these files.

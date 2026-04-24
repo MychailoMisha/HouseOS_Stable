@@ -3,6 +3,11 @@
 pub mod port_io;
 pub mod pci;
 pub mod usb;
+pub mod net;
+pub mod battery;
+
+pub use battery::init as battery_init;
+
 pub mod video {
     pub mod vesa_lfb;
 }

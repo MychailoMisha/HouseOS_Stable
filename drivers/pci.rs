@@ -102,6 +102,14 @@ pub fn read_config_dword(bus: u16, dev: u16, func: u16, offset: u16) -> u32 {
     }
 }
 
+pub fn write_config_dword(bus: u16, dev: u16, func: u16, offset: u16, value: u32) {
+    let addr = config_address(bus, dev, func, offset);
+    unsafe {
+        outl(CONFIG_ADDRESS, addr);
+        outl(CONFIG_DATA, value);
+    }
+}
+
 pub fn read_config_word(bus: u16, dev: u16, func: u16, offset: u16) -> u16 {
     let value = read_config_dword(bus, dev, func, offset & 0xFC);
     let shift = (offset & 2) * 8;
@@ -112,6 +120,24 @@ pub fn read_config_byte(bus: u16, dev: u16, func: u16, offset: u16) -> u8 {
     let value = read_config_dword(bus, dev, func, offset & 0xFC);
     let shift = (offset & 3) * 8;
     ((value >> shift) & 0xFF) as u8
+}
+
+pub fn write_config_word(bus: u16, dev: u16, func: u16, offset: u16, value: u16) {
+    let aligned = offset & 0xFC;
+    let shift = (offset & 2) * 8;
+    let mut current = read_config_dword(bus, dev, func, aligned);
+    current &= !(0xFFFFu32 << shift);
+    current |= (value as u32) << shift;
+    write_config_dword(bus, dev, func, aligned, current);
+}
+
+pub fn write_config_byte(bus: u16, dev: u16, func: u16, offset: u16, value: u8) {
+    let aligned = offset & 0xFC;
+    let shift = (offset & 3) * 8;
+    let mut current = read_config_dword(bus, dev, func, aligned);
+    current &= !(0xFFu32 << shift);
+    current |= (value as u32) << shift;
+    write_config_dword(bus, dev, func, aligned, current);
 }
 
 fn config_address(bus: u16, dev: u16, func: u16, offset: u16) -> u32 {
