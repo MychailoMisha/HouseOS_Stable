@@ -1,11 +1,16 @@
 param(
     [string]$NasmPath = "C:\Program Files\NASM\nasm.exe",
     [string]$QemuPath = "C:\Program Files\qemu\qemu-system-i386.exe",
+    [string]$QemuUefiPath = "C:\Program Files\qemu\qemu-system-x86_64.exe",
     [string]$ImagePath = "",
     [string]$CursorPath = "",
     [int]$CursorSize = 32,
     [int]$CursorX = -1,
     [int]$CursorY = -1,
+    [ValidateSet("auto", "bios", "uefi")]
+    [string]$Firmware = "auto",
+    [string]$OvmfCodePath = "",
+    [string]$OvmfVarsPath = "",
     [ValidateSet("iso", "raw")]
     [string]$Boot = "iso"
 )
@@ -37,7 +42,13 @@ if ($Boot -eq "iso") {
     if (-not (Test-Path $runIso)) {
         throw "run-iso.ps1 not found at $runIso"
     }
-    & $runIso -QemuPath $QemuPath -ImagePath $ImagePath
+    & $runIso `
+        -QemuBiosPath $QemuPath `
+        -QemuUefiPath $QemuUefiPath `
+        -Firmware $Firmware `
+        -OvmfCodePath $OvmfCodePath `
+        -OvmfVarsPath $OvmfVarsPath `
+        -ImagePath $ImagePath
     return
 }
 
