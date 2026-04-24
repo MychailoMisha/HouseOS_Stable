@@ -51,50 +51,75 @@ pub fn draw(fb: &Framebuffer, now: RtcTime) {
 
     let bar_h = BAR_H;
     let y = fb.height.saturating_sub(bar_h);
-    let (bg_top, bg_bottom, text, detail_text, brand, border) = if settings.dark {
-        (
-            0x00272727,
-            0x001E1E1E,
-            0x00F2F5F8,
-            0x00B7C0CC,
-            blend_rgb(settings.accent, 0x00FFFFFF, 20),
-            0x00444444,
-        )
-    } else {
-        (
-            0x00FDFEFF,
-            0x00ECF2FB,
-            0x00121B29,
-            0x004D5D72,
-            blend_rgb(settings.accent, 0x00FFFFFF, 36),
-            0x00CDDAEA,
-        )
-    };
+    let w = fb.width.min(MAX_W);
 
-    fill_vertical_gradient(fb, 0, y, fb.width, bar_h, bg_top, bg_bottom);
-    display::fill_rect(fb, 0, y, fb.width, 1, border);
-    display::fill_rect(
-        fb,
-        0,
-        y + bar_h.saturating_sub(1),
-        fb.width,
-        1,
-        blend_rgb(border, 0x00FFFFFF, 24),
-    );
+    // 1. Відновлюємо оригінальний фон (прибираємо накопичення прозорості)
+    restore_background(fb, y, w);
 
-    let mut writer = crate::TextWriter::new(*fb);
-
-    writer.set_color(brand);
-    writer.set_pos(12, y + 11);
-    writer.write_bytes(b"HouseOS");
-
-    let mut right_x = fb.width.saturating_sub(12);
-
-    if battery::has_battery() {
-        right_x = draw_battery(fb, right_x, y, bar_h, &mut writer, text, detail_text);
+    // 2. Малюємо фон із прозорістю 30% (альфа = 70% непрозорості)
+    //    Колір залежить від теми: темний або світлий
+    let bg_color = if settings.dark { 0x00272727 } else { 0x00FDFEFF };
+    let alpha = 0xB3; // 70% opacity → 30% transparency (змініть на 0xCC для меншої прозорості)
+    for row in 0..bar_h {
+        for col in 0..w {
+            let px = col;
+            let py = y + row;
+            let current = display::get_pixel(fb, px, py);
+            let blended = blend_alpha(current, bg_color, alpha);
+            display::put_pixel(fb, px, py, blended);
+        }
     }
 
-    draw_clock_with_date(right_x, y, now, &settings, &mut writer, text, detail_text);
+    // 3. Малюємо текст, батарею, годинник
+    let text_color = if settings.dark { 0x00F2F5F8 } else { 0x00121B29 };
+    let detail_text_color = if settings.dark { 0x00B7C0CC } else { 0x004D5D72 };
+
+    let mut writer = crate::TextWriter::new(*fb);
+    let mut right_x = w.saturating_sub(12);
+
+    if battery::has_battery() {
+        right_x = draw_battery(fb, right_x, y, bar_h, &mut writer, text_color, detail_text_color);
+    }
+
+    let adjusted_now = system::apply_timezone(now);
+    draw_clock_with_date(right_x, y, adjusted_now, &settings, &mut writer, text_color, detail_text_color);
+}
+
+/// Відновлює оригінальний фон статус-бару зі збереженого буфера
+fn restore_background(fb: &Framebuffer, y: usize, w: usize) {
+    unsafe {
+        if !STATUS_SAVED || STATUS_W == 0 {
+            return;
+        }
+        let w_restore = STATUS_W.min(w);
+        let mut idx = 0usize;
+        for row in 0..BAR_H {
+            for col in 0..w_restore {
+                let px = col;
+                let py = y + row;
+                let rgb = STATUS_BACK[idx];
+                display::put_pixel(fb, px, py, rgb);
+                idx += 1;
+            }
+        }
+    }
+}
+
+/// Змішує два кольори (фон і передній план) з прозорістю alpha (0..255)
+/// alpha – непрозорість переднього плану (0 = повністю прозорий, 255 = повністю непрозорий)
+fn blend_alpha(bg: u32, fg: u32, alpha: u8) -> u32 {
+    let a = alpha as u32;
+    let inv_a = 255 - a;
+    let br = (bg >> 16) & 0xFF;
+    let bg_ = (bg >> 8) & 0xFF;
+    let bb = bg & 0xFF;
+    let fr = (fg >> 16) & 0xFF;
+    let fg_ = (fg >> 8) & 0xFF;
+    let fb = fg & 0xFF;
+    let r = (br * inv_a + fr * a) / 255;
+    let g = (bg_ * inv_a + fg_ * a) / 255;
+    let b = (bb * inv_a + fb * a) / 255;
+    (r << 16) | (g << 8) | b
 }
 
 fn draw_battery(
@@ -112,22 +137,17 @@ fn draw_battery(
     let icon_h = 10usize;
     let icon_x = x.saturating_sub(94);
     let icon_y = y + (h.saturating_sub(icon_h)) / 2 + 1;
+
+    // Корпус батареї
     let body_border = if level > 20 { detail_text_color } else { 0x00E84A5F };
-
     display::fill_rect(fb, icon_x, icon_y, icon_w, 1, body_border);
-    display::fill_rect(fb, icon_x, icon_y + icon_h.saturating_sub(1), icon_w, 1, body_border);
+    display::fill_rect(fb, icon_x, icon_y + icon_h - 1, icon_w, 1, body_border);
     display::fill_rect(fb, icon_x, icon_y, 1, icon_h, body_border);
-    display::fill_rect(fb, icon_x + icon_w.saturating_sub(1), icon_y, 1, icon_h, body_border);
-    display::fill_rect(
-        fb,
-        icon_x + icon_w,
-        icon_y + 3,
-        2,
-        icon_h.saturating_sub(6),
-        body_border,
-    );
+    display::fill_rect(fb, icon_x + icon_w - 1, icon_y, 1, icon_h, body_border);
+    display::fill_rect(fb, icon_x + icon_w, icon_y + 3, 2, icon_h - 6, body_border);
 
-    let fill_w = ((icon_w.saturating_sub(4)) * level as usize) / 100;
+    // Заливка рівня
+    let fill_w = ((icon_w - 4) * level as usize) / 100;
     let fill_color = if level > 50 {
         0x0051B56B
     } else if level > 20 {
@@ -140,15 +160,15 @@ fn draw_battery(
             fb,
             icon_x + 2,
             icon_y + 2,
-            fill_w.min(icon_w.saturating_sub(4)),
-            icon_h.saturating_sub(4),
+            fill_w.min(icon_w - 4),
+            icon_h - 4,
             fill_color,
         );
     }
 
+    // Текст із відсотками
     writer.set_color(text_color);
     writer.set_pos(icon_x + icon_w + 8, y + h / 2 - 4);
-
     let mut buf = [0u8; 4];
     let idx = if level >= 100 {
         buf[0] = b'1';
@@ -156,11 +176,11 @@ fn draw_battery(
         buf[2] = b'0';
         3
     } else if level >= 10 {
-        buf[0] = b'0' + (level / 10);
-        buf[1] = b'0' + (level % 10);
+        buf[0] = b'0' + (level / 10) as u8;
+        buf[1] = b'0' + (level % 10) as u8;
         2
     } else {
-        buf[0] = b'0' + level;
+        buf[0] = b'0' + level as u8;
         1
     };
     buf[idx] = b'%';
@@ -257,60 +277,6 @@ fn format_date(buf: &mut [u8; 10], now: RtcTime) {
     buf[7] = b'0' + (year % 10) as u8;
     buf[8] = 0;
     buf[9] = 0;
-}
-
-fn fill_vertical_gradient(
-    fb: &Framebuffer,
-    x: usize,
-    y: usize,
-    w: usize,
-    h: usize,
-    top: u32,
-    bottom: u32,
-) {
-    if w == 0 || h == 0 {
-        return;
-    }
-    if h == 1 {
-        display::fill_rect(fb, x, y, w, 1, top);
-        return;
-    }
-    let den = (h - 1) as u32;
-    for row in 0..h {
-        let c = lerp_rgb(top, bottom, row as u32, den);
-        display::fill_rect(fb, x, y + row, w, 1, c);
-    }
-}
-
-fn lerp_rgb(a: u32, b: u32, num: u32, den: u32) -> u32 {
-    if den == 0 {
-        return a;
-    }
-    let ar = ((a >> 16) & 0xFF) as u32;
-    let ag = ((a >> 8) & 0xFF) as u32;
-    let ab = (a & 0xFF) as u32;
-    let br = ((b >> 16) & 0xFF) as u32;
-    let bg = ((b >> 8) & 0xFF) as u32;
-    let bb = (b & 0xFF) as u32;
-    let r = (ar * (den - num) + br * num) / den;
-    let g = (ag * (den - num) + bg * num) / den;
-    let b = (ab * (den - num) + bb * num) / den;
-    (r << 16) | (g << 8) | b
-}
-
-fn blend_rgb(base: u32, mix: u32, mix_strength: u8) -> u32 {
-    let s = mix_strength as u32;
-    let inv = 255u32.saturating_sub(s);
-    let br = (base >> 16) & 0xFF;
-    let bg = (base >> 8) & 0xFF;
-    let bb = base & 0xFF;
-    let mr = (mix >> 16) & 0xFF;
-    let mg = (mix >> 8) & 0xFF;
-    let mb = mix & 0xFF;
-    let r = (br * inv + mr * s) / 255;
-    let g = (bg * inv + mg * s) / 255;
-    let b = (bb * inv + mb * s) / 255;
-    (r << 16) | (g << 8) | b
 }
 
 pub fn hide(fb: &Framebuffer) {

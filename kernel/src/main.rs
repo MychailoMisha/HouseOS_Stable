@@ -4,11 +4,13 @@
 
 mod cursor;
 mod console;
-mod commands;  // ДОДАНО - новий модуль для команд
+mod commands;
 mod calculator;
+mod browser;
 mod clipboard;
 mod desktop;
 mod explorer;
+mod notepad;
 mod display;
 mod fat32;
 mod window;
@@ -16,6 +18,7 @@ mod input;
 mod rtc;
 mod start_menu;
 mod status_bar;
+mod taskbar;
 mod system;
 mod optimizer;
 mod memory;
@@ -301,6 +304,11 @@ fn kernel_main(
     desktop::capture(&fb);
     display::present(&fb);
 
+    // Зберегти час завантаження для uptime
+    if let Some(boot_time) = rtc::read_time() {
+        system::set_boot_time(boot_time);
+    }
+
     let mem_total_kib = mem_total / 1024;
     let mem_avail_kib = mem_avail / 1024;
     system::set_system_info(system::SystemInfo {
@@ -313,6 +321,7 @@ fn kernel_main(
 
     // Ініціалізація драйверів
     let _usb = drivers::usb::init();
+    let _net = drivers::net::init();
     drivers::battery_init();
 
     let cursor_raw = if let Some(initrd_mod) = initrd {

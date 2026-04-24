@@ -281,6 +281,13 @@ impl ClipboardWindow {
         self.win_x = x;
         self.win_y = y;
     }
+
+    pub fn set_rect(&mut self, x: usize, y: usize, w: usize, h: usize) {
+        self.win_x = x;
+        self.win_y = y;
+        self.win_w = w;
+        self.win_h = h;
+    }
 }
 
 fn count_lines(data: &[u8]) -> usize {

@@ -1,3 +1,5 @@
+use crate::rtc::RtcTime;
+
 #[derive(Copy, Clone)]
 pub struct SystemInfo {
     pub mem_total_kib: u64,
@@ -31,6 +33,9 @@ static mut UI: UiSettings = UiSettings {
     mouse_scale: 1,
     dark: false,
 };
+
+static mut GMT_OFFSET: i8 = 0;
+static mut BOOT_TIME: Option<RtcTime> = None;
 
 pub fn set_system_info(info: SystemInfo) {
     unsafe {
@@ -88,4 +93,84 @@ pub fn toggle_theme() -> bool {
         UI.dark = !UI.dark;
         UI.dark
     }
+}
+
+pub fn set_gmt_offset(offset: i8) {
+    unsafe {
+        GMT_OFFSET = offset;
+    }
+}
+
+pub fn get_gmt_offset() -> i8 {
+    unsafe { GMT_OFFSET }
+}
+
+pub fn set_boot_time(time: RtcTime) {
+    unsafe {
+        BOOT_TIME = Some(time);
+    }
+}
+
+pub fn get_boot_time() -> Option<RtcTime> {
+    unsafe { BOOT_TIME }
+}
+
+// Перевірка на високосний рік
+fn is_leap(year: i32) -> bool {
+    (year % 4 == 0) && (year % 100 != 0 || year % 400 == 0)
+}
+
+// Повертає кількість днів у місяці
+fn days_in_month(year: i32, month: i32) -> i32 {
+    match month {
+        1 => 31, 2 => if is_leap(year) { 29 } else { 28 },
+        3 => 31, 4 => 30, 5 => 31, 6 => 30,
+        7 => 31, 8 => 31, 9 => 30, 10 => 31, 11 => 30, 12 => 31,
+        _ => 31,
+    }
+}
+
+pub fn apply_timezone(mut t: RtcTime) -> RtcTime {
+    let offset = get_gmt_offset();
+    let mut new_hour = t.hour as i16 + offset as i16;
+    let mut day_delta = 0;
+
+    while new_hour < 0 {
+        new_hour += 24;
+        day_delta -= 1;
+    }
+    while new_hour >= 24 {
+        new_hour -= 24;
+        day_delta += 1;
+    }
+    t.hour = new_hour as u8;
+
+    if day_delta != 0 {
+        let mut day = t.day as i32 + day_delta;
+        let mut month = t.month as i32;
+        let mut year = t.year as i32;
+
+        while day < 1 {
+            month -= 1;
+            if month < 1 {
+                month = 12;
+                year -= 1;
+            }
+            day += days_in_month(year, month);
+        }
+        while day > days_in_month(year, month) {
+            day -= days_in_month(year, month);
+            month += 1;
+            if month > 12 {
+                month = 1;
+                year += 1;
+            }
+        }
+
+        t.day = day as u8;
+        t.month = month as u8;
+        t.year = year as u16;
+    }
+
+    t
 }

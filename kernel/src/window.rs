@@ -1,11 +1,12 @@
-// window.rs
-use crate::display::{self, Framebuffer};
+﻿use crate::display::{self, Framebuffer};
 use crate::system;
 
-pub const HEADER_H: usize = 34;
-pub const CLOSE_SIZE: usize = 16;
-pub const CORNER_RADIUS: usize = 10;
-pub const SHADOW_SIZE: usize = 8;
+pub const HEADER_H: usize = 42;
+pub const CORNER_RADIUS: usize = 14;
+
+const BTN_SIZE: usize = 22;
+const BTN_GAP: usize = 6;
+const BTN_RIGHT_PAD: usize = 10;
 
 #[derive(Copy, Clone)]
 pub struct ChromeLayout {
@@ -14,7 +15,10 @@ pub struct ChromeLayout {
     pub content_w: usize,
     pub content_h: usize,
     pub close: (usize, usize, usize, usize),
+    pub maximize: (usize, usize, usize, usize),
+    pub minimize: (usize, usize, usize, usize),
     pub header: (usize, usize, usize, usize),
+    pub drag_header: (usize, usize, usize, usize),
 }
 
 pub fn draw_window(
@@ -29,196 +33,99 @@ pub fn draw_window(
     let accent = ui.accent;
     let is_dark = ui.dark;
 
-    // Кольори залежно від теми
-    let (shadow_base, shadow_mid, shadow_light) = if is_dark {
-        (0x00000000, 0x00101010, 0x00202020)
-    } else {
-        (0x00262D36, 0x00424C57, 0x005A6A7A)
-    };
+    let bg_main = if is_dark { 0x001A1A1A } else { 0x00FDFDFD };
+    let header_bg = if is_dark { 0x00222222 } else { 0x00F3F4F6 };
+    let text_primary = if is_dark { 0x00FFFFFF } else { 0x001A1A1A };
+    let shadow_soft = if is_dark { 0x00050505 } else { 0x00202020 };
+    let outer_border = if is_dark { 0x00333333 } else { 0x00D1D5DB };
+    let inner_border = if is_dark { 0x00444444 } else { 0x00FFFFFF };
 
-    let (bg_top, bg_bottom) = if is_dark {
-        (0x00252525, 0x001E1E1E)
-    } else {
-        (0x00FFFFFF, 0x00F2F6FC)
-    };
-
-    let (header_top, header_bottom) = if is_dark {
-        (0x00353535, 0x002C2C2C)
-    } else {
-        (0x00FFFFFF, 0x00F0F5FB)
-    };
-
-    let border_color = if is_dark { 0x00454545 } else { 0x00CCD7E6 };
-    let text_color = if is_dark { 0x00F0F2F5 } else { 0x001C2A3A };
-    let close_top = 0x00E84A5F;
-    let close_bottom = 0x00C92B40;
-    let close_text = 0x00FFFFFF;
-
-    // Тінь (імітація розмиття)
-    draw_rounded_rect(fb, x + SHADOW_SIZE, y + SHADOW_SIZE, w, h, CORNER_RADIUS, shadow_base);
-    draw_rounded_rect(
-        fb,
-        x + SHADOW_SIZE / 2,
-        y + SHADOW_SIZE / 2,
-        w,
-        h,
-        CORNER_RADIUS,
-        shadow_mid,
-    );
-    draw_rounded_rect(
-        fb,
-        x + SHADOW_SIZE / 4,
-        y + SHADOW_SIZE / 4,
-        w,
-        h,
-        CORNER_RADIUS,
-        shadow_light,
-    );
-
-    // Фон вікна з градієнтом та заокругленнями
-    fill_rounded_gradient(fb, x, y, w, h, CORNER_RADIUS, bg_top, bg_bottom);
-
-    // Обвідка
-    draw_rounded_rect_outline(fb, x, y, w, h, CORNER_RADIUS, 1, border_color);
-
-    // Заголовок вікна (тільки верхня частина із заокругленнями)
-    let header_w = w.saturating_sub(2);
-    fill_vertical_gradient_rounded_top(
+    draw_rounded_rect(fb, x + 5, y + 5, w, h, CORNER_RADIUS, shadow_soft);
+    draw_rounded_rect(fb, x + 2, y + 2, w, h, CORNER_RADIUS, shadow_soft);
+    draw_rounded_rect(fb, x, y, w, h, CORNER_RADIUS, bg_main);
+    draw_rounded_rect_top(fb, x, y, w, HEADER_H, CORNER_RADIUS, header_bg);
+    display::fill_rect(fb, x + 1, y + HEADER_H - 1, w.saturating_sub(2), 1, outer_border);
+    display::fill_rect(fb, x + 8, y + 14, 3, 14, accent);
+    draw_rounded_rect_outline(fb, x, y, w, h, CORNER_RADIUS, 1, outer_border);
+    draw_rounded_rect_outline(
         fb,
         x + 1,
         y + 1,
-        header_w,
-        HEADER_H,
-        CORNER_RADIUS.saturating_sub(1),
-        header_top,
-        header_bottom,
-    );
-
-    // Акцентна смуга під заголовком
-    display::fill_rect(
-        fb,
-        x + 1,
-        y + HEADER_H,
         w.saturating_sub(2),
-        2,
-        blend_rgb(accent, 0x00FFFFFF, if is_dark { 20 } else { 30 }),
+        h.saturating_sub(2),
+        CORNER_RADIUS.saturating_sub(1),
+        1,
+        inner_border,
     );
 
-    // Кнопка закриття
     let close = close_rect(x, y, w);
-    fill_vertical_gradient(
-        fb,
-        close.0,
-        close.1,
-        close.2,
-        close.3,
-        close_top,
-        close_bottom,
-    );
-    draw_rounded_rect_outline(
-        fb,
-        close.0,
-        close.1,
-        close.2,
-        close.3,
-        4,
-        1,
-        blend_rgb(close_top, 0x00FFFFFF, 20),
-    );
+    let maximize = maximize_rect(x, y, w);
+    let minimize = minimize_rect(x, y, w);
+    let btn_bg = if is_dark { 0x00333333 } else { 0x00E5E7EB };
+
+    draw_rounded_rect(fb, minimize.0, minimize.1, minimize.2, minimize.3, 8, btn_bg);
+    draw_rounded_rect(fb, maximize.0, maximize.1, maximize.2, maximize.3, 8, btn_bg);
+    draw_rounded_rect(fb, close.0, close.1, close.2, close.3, 8, btn_bg);
 
     let mut writer = crate::TextWriter::new(*fb);
-    writer.set_color(text_color);
-    writer.set_pos(x + 14, y + 10);
+    writer.set_color(text_primary);
+    writer.set_pos(x + 22, y + 13);
     writer.write_bytes(title);
 
-    writer.set_color(close_text);
-    writer.set_pos(close.0 + 5, close.1 + 4);
-    writer.write_bytes(b"X");
-
-    let header = (x, y, w, HEADER_H);
-    let content_x = x + 1;
-    let content_y = y + HEADER_H + 2;
-    let content_w = w.saturating_sub(2);
-    let content_h = h.saturating_sub(HEADER_H + 3);
+    let icon_color = if is_dark { 0x00B5BBC5 } else { 0x004B5563 };
+    writer.set_color(icon_color);
+    writer.set_pos(minimize.0 + 7, minimize.1 + 6);
+    writer.write_bytes(b"-");
+    writer.set_pos(maximize.0 + 7, maximize.1 + 6);
+    writer.write_bytes(b"o");
+    writer.set_pos(close.0 + 8, close.1 + 6);
+    writer.write_bytes(b"x");
 
     ChromeLayout {
-        content_x,
-        content_y,
-        content_w,
-        content_h,
+        content_x: x + 2,
+        content_y: y + HEADER_H + 2,
+        content_w: w.saturating_sub(4),
+        content_h: h.saturating_sub(HEADER_H + 4),
         close,
-        header,
+        maximize,
+        minimize,
+        header: (x, y, w, HEADER_H),
+        drag_header: drag_header_rect(x, y, w),
     }
 }
 
 pub fn close_rect(x: usize, y: usize, w: usize) -> (usize, usize, usize, usize) {
-    let cx = x + w.saturating_sub(CLOSE_SIZE + 10);
-    let cy = y + (HEADER_H.saturating_sub(CLOSE_SIZE)) / 2;
-    (cx, cy, CLOSE_SIZE, CLOSE_SIZE)
+    let cx = x + w.saturating_sub(BTN_RIGHT_PAD + BTN_SIZE);
+    let cy = y + (HEADER_H.saturating_sub(BTN_SIZE)) / 2;
+    (cx, cy, BTN_SIZE, BTN_SIZE)
+}
+
+pub fn maximize_rect(x: usize, y: usize, w: usize) -> (usize, usize, usize, usize) {
+    let close = close_rect(x, y, w);
+    let cx = close.0.saturating_sub(BTN_SIZE + BTN_GAP);
+    (cx, close.1, BTN_SIZE, BTN_SIZE)
+}
+
+pub fn minimize_rect(x: usize, y: usize, w: usize) -> (usize, usize, usize, usize) {
+    let max = maximize_rect(x, y, w);
+    let cx = max.0.saturating_sub(BTN_SIZE + BTN_GAP);
+    (cx, max.1, BTN_SIZE, BTN_SIZE)
 }
 
 pub fn header_rect(x: usize, y: usize, w: usize) -> (usize, usize, usize, usize) {
     (x, y, w, HEADER_H)
 }
 
+pub fn drag_header_rect(x: usize, y: usize, w: usize) -> (usize, usize, usize, usize) {
+    let min_btn = minimize_rect(x, y, w);
+    let start_x = x + 12;
+    let right = min_btn.0.saturating_sub(6);
+    let drag_w = right.saturating_sub(start_x);
+    (start_x, y, drag_w, HEADER_H)
+}
+
 pub fn hit(px: usize, py: usize, rect: (usize, usize, usize, usize)) -> bool {
     px >= rect.0 && py >= rect.1 && px < rect.0 + rect.2 && py < rect.1 + rect.3
-}
-
-// ---------- Допоміжні функції ----------
-fn fill_vertical_gradient(
-    fb: &Framebuffer,
-    x: usize,
-    y: usize,
-    w: usize,
-    h: usize,
-    top: u32,
-    bottom: u32,
-) {
-    if w == 0 || h == 0 {
-        return;
-    }
-    if h == 1 {
-        display::fill_rect(fb, x, y, w, 1, top);
-        return;
-    }
-    let den = (h - 1) as u32;
-    for row in 0..h {
-        let t = row as u32;
-        let c = lerp_rgb(top, bottom, t, den);
-        display::fill_rect(fb, x, y + row, w, 1, c);
-    }
-}
-
-fn fill_vertical_gradient_rounded_top(
-    fb: &Framebuffer,
-    x: usize,
-    y: usize,
-    w: usize,
-    h: usize,
-    radius: usize,
-    top: u32,
-    bottom: u32,
-) {
-    if w == 0 || h == 0 {
-        return;
-    }
-    let den = (h - 1) as u32;
-    for row in 0..h {
-        let t = row as u32;
-        let c = lerp_rgb(top, bottom, t, den);
-        if row < radius {
-            for col in 0..w {
-                let px = x + col;
-                let py = y + row;
-                if is_inside_rounded_top(col, row, w, radius) {
-                    display::put_pixel(fb, px, py, c);
-                }
-            }
-        } else {
-            display::fill_rect(fb, x, y + row, w, 1, c);
-        }
-    }
 }
 
 fn draw_rounded_rect(
@@ -227,7 +134,7 @@ fn draw_rounded_rect(
     y: usize,
     w: usize,
     h: usize,
-    radius: usize,
+    r: usize,
     color: u32,
 ) {
     if w == 0 || h == 0 {
@@ -235,7 +142,38 @@ fn draw_rounded_rect(
     }
     for dy in 0..h {
         for dx in 0..w {
-            if is_inside_rounded(dx, dy, w, h, radius) {
+            if is_inside_rounded(dx, dy, w, h, r) {
+                display::put_pixel(fb, x + dx, y + dy, color);
+            }
+        }
+    }
+}
+
+fn draw_rounded_rect_top(
+    fb: &Framebuffer,
+    x: usize,
+    y: usize,
+    w: usize,
+    h: usize,
+    r: usize,
+    color: u32,
+) {
+    for dy in 0..h {
+        for dx in 0..w {
+            let inside = if dy < r {
+                if dx < r {
+                    (dx as isize - r as isize).pow(2) + (dy as isize - r as isize).pow(2)
+                        <= (r * r) as isize
+                } else if dx >= w.saturating_sub(r) {
+                    (dx as isize - (w - r) as isize).pow(2) + (dy as isize - r as isize).pow(2)
+                        <= (r * r) as isize
+                } else {
+                    true
+                }
+            } else {
+                true
+            };
+            if inside {
                 display::put_pixel(fb, x + dx, y + dy, color);
             }
         }
@@ -248,126 +186,43 @@ fn draw_rounded_rect_outline(
     y: usize,
     w: usize,
     h: usize,
-    radius: usize,
+    r: usize,
     thickness: usize,
     color: u32,
 ) {
     for dy in 0..h {
         for dx in 0..w {
-            let inside = is_inside_rounded(dx, dy, w, h, radius);
-            let inside_inner = if thickness > 0 {
-                is_inside_rounded(
-                    dx + thickness,
-                    dy + thickness,
-                    w.saturating_sub(2 * thickness),
-                    h.saturating_sub(2 * thickness),
-                    radius.saturating_sub(thickness),
-                )
-            } else {
-                false
-            };
-            if inside && !inside_inner {
+            let inside = is_inside_rounded(dx, dy, w, h, r);
+            let inner = is_inside_rounded(
+                dx + thickness,
+                dy + thickness,
+                w.saturating_sub(2 * thickness),
+                h.saturating_sub(2 * thickness),
+                r.saturating_sub(thickness),
+            );
+            if inside && !inner {
                 display::put_pixel(fb, x + dx, y + dy, color);
             }
         }
     }
 }
 
-fn fill_rounded_gradient(
-    fb: &Framebuffer,
-    x: usize,
-    y: usize,
-    w: usize,
-    h: usize,
-    radius: usize,
-    top: u32,
-    bottom: u32,
-) {
-    if w == 0 || h == 0 {
-        return;
-    }
-    let den = (h - 1) as u32;
-    for dy in 0..h {
-        let t = dy as u32;
-        let c = lerp_rgb(top, bottom, t, den);
-        for dx in 0..w {
-            if is_inside_rounded(dx, dy, w, h, radius) {
-                display::put_pixel(fb, x + dx, y + dy, c);
-            }
-        }
-    }
-}
-
-fn is_inside_rounded(dx: usize, dy: usize, w: usize, h: usize, radius: usize) -> bool {
-    let r = radius;
-    // верхній лівий
+fn is_inside_rounded(dx: usize, dy: usize, w: usize, h: usize, r: usize) -> bool {
     if dx < r && dy < r {
-        let dist = (dx as isize - r as isize).pow(2) + (dy as isize - r as isize).pow(2);
-        return dist <= (r * r) as isize;
+        return (dx as isize - r as isize).pow(2) + (dy as isize - r as isize).pow(2)
+            <= (r * r) as isize;
     }
-    // верхній правий
-    if dx >= w - r && dy < r {
-        let cx = (w - r) as isize;
-        let dist = (dx as isize - cx).pow(2) + (dy as isize - r as isize).pow(2);
-        return dist <= (r * r) as isize;
+    if dx >= w.saturating_sub(r) && dy < r {
+        return (dx as isize - (w - r) as isize).pow(2) + (dy as isize - r as isize).pow(2)
+            <= (r * r) as isize;
     }
-    // нижній лівий
-    if dx < r && dy >= h - r {
-        let cy = (h - r) as isize;
-        let dist = (dx as isize - r as isize).pow(2) + (dy as isize - cy).pow(2);
-        return dist <= (r * r) as isize;
+    if dx < r && dy >= h.saturating_sub(r) {
+        return (dx as isize - r as isize).pow(2) + (dy as isize - (h - r) as isize).pow(2)
+            <= (r * r) as isize;
     }
-    // нижній правий
-    if dx >= w - r && dy >= h - r {
-        let cx = (w - r) as isize;
-        let cy = (h - r) as isize;
-        let dist = (dx as isize - cx).pow(2) + (dy as isize - cy).pow(2);
-        return dist <= (r * r) as isize;
+    if dx >= w.saturating_sub(r) && dy >= h.saturating_sub(r) {
+        return (dx as isize - (w - r) as isize).pow(2) + (dy as isize - (h - r) as isize).pow(2)
+            <= (r * r) as isize;
     }
     true
-}
-
-fn is_inside_rounded_top(dx: usize, dy: usize, w: usize, radius: usize) -> bool {
-    let r = radius;
-    if dx < r && dy < r {
-        let dist = (dx as isize - r as isize).pow(2) + (dy as isize - r as isize).pow(2);
-        return dist <= (r * r) as isize;
-    }
-    if dx >= w - r && dy < r {
-        let cx = (w - r) as isize;
-        let dist = (dx as isize - cx).pow(2) + (dy as isize - r as isize).pow(2);
-        return dist <= (r * r) as isize;
-    }
-    true
-}
-
-fn lerp_rgb(a: u32, b: u32, num: u32, den: u32) -> u32 {
-    if den == 0 {
-        return a;
-    }
-    let ar = ((a >> 16) & 0xFF) as u32;
-    let ag = ((a >> 8) & 0xFF) as u32;
-    let ab = (a & 0xFF) as u32;
-    let br = ((b >> 16) & 0xFF) as u32;
-    let bg = ((b >> 8) & 0xFF) as u32;
-    let bb = (b & 0xFF) as u32;
-    let r = (ar * (den - num) + br * num) / den;
-    let g = (ag * (den - num) + bg * num) / den;
-    let b = (ab * (den - num) + bb * num) / den;
-    (r << 16) | (g << 8) | b
-}
-
-fn blend_rgb(base: u32, mix: u32, mix_strength: u8) -> u32 {
-    let s = mix_strength as u32;
-    let inv = 255u32.saturating_sub(s);
-    let br = (base >> 16) & 0xFF;
-    let bg = (base >> 8) & 0xFF;
-    let bb = base & 0xFF;
-    let mr = (mix >> 16) & 0xFF;
-    let mg = (mix >> 8) & 0xFF;
-    let mb = mix & 0xFF;
-    let r = (br * inv + mr * s) / 255;
-    let g = (bg * inv + mg * s) / 255;
-    let b = (bb * inv + mb * s) / 255;
-    (r << 16) | (g << 8) | b
 }

@@ -53,13 +53,13 @@ impl Calculator {
 
     pub fn handle_click(&mut self, fb: &Framebuffer, x: usize, y: usize) {
         if !self.visible { return; }
-        let (wx, wy, ww, _) = self.rect(fb);
+        let (wx, wy, ww, wh) = self.rect(fb);
         
         // Розрахунок області кнопок
         let bx_start = wx + PAD;
         let by_start = wy + window::HEADER_H + PAD + DISPLAY_H + PAD;
         let bw = (ww - 2 * PAD - (BUTTON_COLS - 1) * BUTTON_GAP) / BUTTON_COLS;
-        let bh = (WIN_HEIGHT - window::HEADER_H - 3 * PAD - DISPLAY_H - (BUTTON_ROWS - 1) * BUTTON_GAP) / BUTTON_ROWS;
+        let bh = (wh - window::HEADER_H - 3 * PAD - DISPLAY_H - (BUTTON_ROWS - 1) * BUTTON_GAP) / BUTTON_ROWS;
 
         if x < bx_start || y < by_start { return; }
         
@@ -355,6 +355,13 @@ impl Calculator {
 
     pub fn set_pos(&mut self, x: usize, y: usize) {
         self.win_x = x; self.win_y = y;
+    }
+
+    pub fn set_rect(&mut self, x: usize, y: usize, w: usize, h: usize) {
+        self.win_x = x;
+        self.win_y = y;
+        self.win_w = w;
+        self.win_h = h;
     }
 }
 

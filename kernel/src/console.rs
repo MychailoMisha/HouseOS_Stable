@@ -207,6 +207,13 @@ impl Console {
     }
 
     pub fn set_pos(&mut self, x: usize, y: usize) { (self.win_x, self.win_y) = (x, y); }
+
+    pub fn set_rect(&mut self, x: usize, y: usize, w: usize, h: usize) {
+        self.win_x = x;
+        self.win_y = y;
+        self.win_w = w;
+        self.win_h = h;
+    }
 }
 
 // --- Helpers (Без змін логіки, лише чистіший вигляд) ---

@@ -161,6 +161,44 @@ impl<'a> Fat32<'a> {
         count
     }
 
+    pub fn read_file(&self, start_cluster: u32, file_size: usize, out: &mut [u8]) -> usize {
+        if start_cluster < 2 || out.is_empty() || file_size == 0 {
+            return 0;
+        }
+
+        let mut cluster = start_cluster;
+        let cluster_size = self.cluster_size();
+        let mut written = 0usize;
+        let target = file_size.min(out.len());
+
+        while written < target {
+            let offset = match self.cluster_offset(cluster) {
+                Some(v) => v,
+                None => break,
+            };
+            let end = offset.saturating_add(cluster_size);
+            if end > self.data.len() {
+                break;
+            }
+            let src = &self.data[offset..end];
+            let remain = target - written;
+            let to_copy = remain.min(src.len());
+            out[written..written + to_copy].copy_from_slice(&src[..to_copy]);
+            written += to_copy;
+
+            if written >= target {
+                break;
+            }
+            let next = self.fat_entry(cluster);
+            if next < 2 || next >= FAT32_EOC {
+                break;
+            }
+            cluster = next;
+        }
+
+        written
+    }
+
     fn cluster_size(&self) -> usize {
         self.bytes_per_sector * self.sectors_per_cluster
     }

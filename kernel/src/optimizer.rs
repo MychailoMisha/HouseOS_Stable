@@ -1,15 +1,17 @@
-// optimizer.rs - runtime redraw optimizer for HouseOS
+// optimizer.rs - runtime redraw optimizer for HouseOS (fixed, no_std)
+// Зберігає старий API, виправляє логічні помилки
 
 use crate::display::Framebuffer;
 
+// Константи
 const MAX_DIRTY_RECTS: usize = 24;
-const GC_INTERVAL: usize = 1200;
 const MIN_DIRTY_AREA_THRESHOLD: usize = 8 * 1024;
-const DIRTY_RATIO_DIVISOR: usize = 5; // ~20% of screen
-const LOW_MEM_DIRTY_RATIO_DIVISOR: usize = 8; // ~12.5% of screen
+const DIRTY_RATIO_DIVISOR: usize = 5;
+const LOW_MEM_DIRTY_RATIO_DIVISOR: usize = 8;
 const NEARBY_MERGE_GAP: usize = 3;
 const LOW_MEMORY_SKIP_DIV: usize = 2;
 const MAX_FULL_REDRAW_STREAK: usize = 360;
+const LOW_MEM_RECOVERY_FRAMES: usize = 600;   // через скільки кадрів вийти з low-memory
 
 #[derive(Clone, Copy)]
 pub struct DirtyRect {
@@ -33,7 +35,6 @@ impl DirtyRect {
         let other_right = other.x.saturating_add(other.w).saturating_add(NEARBY_MERGE_GAP);
         let self_bottom = self.y.saturating_add(self.h).saturating_add(NEARBY_MERGE_GAP);
         let other_bottom = other.y.saturating_add(other.h).saturating_add(NEARBY_MERGE_GAP);
-
         !(self_right <= other.x
             || other_right <= self.x
             || self_bottom <= other.y
@@ -58,11 +59,11 @@ pub struct Optimizer {
     dirty_area: usize,
     full_redraw_needed: bool,
     frame_counter: usize,
-    gc_counter: usize,
     optimization_enabled: bool,
     low_memory_mode: bool,
     low_mem_skip_counter: usize,
     full_redraw_streak: usize,
+    frames_since_last_full_redraw: usize,
     screen_w: usize,
     screen_h: usize,
     screen_area: usize,
@@ -76,14 +77,14 @@ impl Optimizer {
             dirty_area: 0,
             full_redraw_needed: true,
             frame_counter: 0,
-            gc_counter: 0,
             optimization_enabled: true,
             low_memory_mode: false,
             low_mem_skip_counter: 0,
             full_redraw_streak: 0,
+            frames_since_last_full_redraw: 0,
             screen_w: 0,
             screen_h: 0,
-            screen_area: 0,
+            screen_area: 1,
         }
     }
 
@@ -93,9 +94,9 @@ impl Optimizer {
         self.screen_area = fb.width.saturating_mul(fb.height).max(1);
         self.full_redraw_needed = true;
         self.frame_counter = 0;
-        self.gc_counter = 0;
         self.low_mem_skip_counter = 0;
         self.full_redraw_streak = 0;
+        self.frames_since_last_full_redraw = 0;
         self.clear_dirty_rects();
     }
 
@@ -103,10 +104,20 @@ impl Optimizer {
         if !self.optimization_enabled {
             return true;
         }
+        if self.full_redraw_needed {
+            return true;
+        }
 
         self.frame_counter = self.frame_counter.wrapping_add(1);
+        self.frames_since_last_full_redraw = self.frames_since_last_full_redraw.saturating_add(1);
 
-        if self.low_memory_mode && !self.full_redraw_needed && self.dirty_count == 0 {
+        // Автоматичний вихід із low-memory режиму
+        if self.low_memory_mode && self.frames_since_last_full_redraw > LOW_MEM_RECOVERY_FRAMES {
+            self.low_memory_mode = false;
+            self.low_mem_skip_counter = 0;
+        }
+
+        if self.low_memory_mode && self.dirty_count == 0 {
             self.low_mem_skip_counter = self.low_mem_skip_counter.wrapping_add(1);
             if self.low_mem_skip_counter % LOW_MEMORY_SKIP_DIV != 0 {
                 return false;
@@ -122,37 +133,23 @@ impl Optimizer {
         if !self.optimization_enabled {
             return;
         }
-
         if !self.full_redraw_needed {
             self.clear_dirty_rects();
-        }
-
-        self.gc_counter = self.gc_counter.wrapping_add(1);
-        if self.gc_counter >= GC_INTERVAL {
-            self.force_gc();
-            self.gc_counter = 0;
         }
     }
 
     pub fn add_dirty_rect(&mut self, x: usize, y: usize, w: usize, h: usize) {
-        if !self.optimization_enabled || w == 0 || h == 0 {
+        if !self.optimization_enabled || w == 0 || h == 0 || self.full_redraw_needed {
             return;
         }
-
-        if self.full_redraw_needed {
-            return;
-        }
-
         let rect = match self.clamp_to_screen(x, y, w, h) {
             Some(r) => r,
             None => return,
         };
-
         if self.dirty_count >= MAX_DIRTY_RECTS {
             self.request_full_redraw();
             return;
         }
-
         for i in 0..self.dirty_count {
             if let Some(existing) = &mut self.dirty_rects[i] {
                 if existing.intersects_or_nearby(&rect) {
@@ -164,10 +161,8 @@ impl Optimizer {
                 }
             }
         }
-
         self.dirty_rects[self.dirty_count] = Some(rect);
         self.dirty_count += 1;
-
         self.coalesce_dirty_rects();
         self.recalc_dirty_area();
         self.check_dirty_budget();
@@ -180,6 +175,7 @@ impl Optimizer {
     pub fn mark_clean(&mut self) {
         self.full_redraw_needed = false;
         self.full_redraw_streak = 0;
+        self.frames_since_last_full_redraw = 0;
         self.clear_dirty_rects();
     }
 
@@ -187,20 +183,17 @@ impl Optimizer {
         if !self.optimization_enabled {
             return false;
         }
-
         if self.full_redraw_needed {
             self.full_redraw_streak = self.full_redraw_streak.saturating_add(1);
         } else if self.full_redraw_streak > 0 {
             self.full_redraw_streak -= 1;
         }
-
         if self.full_redraw_streak > MAX_FULL_REDRAW_STREAK {
             self.low_memory_mode = true;
             self.request_full_redraw();
             self.full_redraw_streak = 0;
             return true;
         }
-
         false
     }
 
@@ -219,6 +212,7 @@ impl Optimizer {
         }
     }
 
+    // --- Внутрішні методи ---
     fn request_full_redraw(&mut self) {
         self.full_redraw_needed = true;
         self.clear_dirty_rects();
@@ -231,13 +225,11 @@ impl Optimizer {
         if x >= self.screen_w || y >= self.screen_h {
             return None;
         }
-
         let end_x = x.saturating_add(w).min(self.screen_w);
         let end_y = y.saturating_add(h).min(self.screen_h);
         if end_x <= x || end_y <= y {
             return None;
         }
-
         Some(DirtyRect::new(x, y, end_x - x, end_y - y))
     }
 
@@ -248,7 +240,7 @@ impl Optimizer {
             DIRTY_RATIO_DIVISOR
         };
         let by_ratio = self.screen_area / divisor.max(1);
-        by_ratio.max(MIN_DIRTY_AREA_THRESHOLD)
+        by_ratio.min(self.screen_area).max(MIN_DIRTY_AREA_THRESHOLD)
     }
 
     fn check_dirty_budget(&mut self) {
@@ -262,53 +254,53 @@ impl Optimizer {
     }
 
     fn coalesce_dirty_rects(&mut self) {
-        let mut merged = true;
-        while merged {
-            merged = false;
-            let mut i = 0usize;
-            while i < self.dirty_count {
-                if self.dirty_rects[i].is_none() {
-                    i += 1;
-                    continue;
-                }
-                let mut j = i + 1;
-                while j < self.dirty_count {
-                    let do_merge = match (self.dirty_rects[i], self.dirty_rects[j]) {
-                        (Some(a), Some(b)) => a.intersects_or_nearby(&b),
-                        _ => false,
-                    };
-                    if do_merge {
-                        if let (Some(mut a), Some(b)) = (self.dirty_rects[i], self.dirty_rects[j]) {
-                            a.merge(&b);
-                            self.dirty_rects[i] = Some(a);
-                            self.remove_rect_at(j);
-                            merged = true;
-                            continue;
-                        }
-                    }
-                    j += 1;
-                }
-                i += 1;
-            }
-        }
-    }
-
-    fn remove_rect_at(&mut self, idx: usize) {
-        if idx >= self.dirty_count {
+        if self.dirty_count <= 1 {
             return;
         }
-        let last = self.dirty_count.saturating_sub(1);
-        for i in idx..last {
-            self.dirty_rects[i] = self.dirty_rects[i + 1];
+        let mut tmp = [None; MAX_DIRTY_RECTS];
+        let mut tmp_len = 0;
+        for i in 0..self.dirty_count {
+            if let Some(rect) = self.dirty_rects[i] {
+                tmp[tmp_len] = Some(rect);
+                tmp_len += 1;
+            }
         }
-        if self.dirty_count > 0 {
-            self.dirty_rects[self.dirty_count - 1] = None;
-            self.dirty_count -= 1;
+        // Сортування бульбашкою (n <= 24)
+        for i in 0..tmp_len {
+            for j in i + 1..tmp_len {
+                let a = tmp[i].unwrap();
+                let b = tmp[j].unwrap();
+                if a.x > b.x || (a.x == b.x && a.y > b.y) {
+                    tmp.swap(i, j);
+                }
+            }
+        }
+        let mut merged = [None; MAX_DIRTY_RECTS];
+        let mut merged_len = 0;
+        for i in 0..tmp_len {
+            let rect = tmp[i].unwrap();
+            if merged_len == 0 {
+                merged[merged_len] = Some(rect);
+                merged_len += 1;
+                continue;
+            }
+            let last = merged[merged_len - 1].as_mut().unwrap();
+            if last.intersects_or_nearby(&rect) {
+                last.merge(&rect);
+            } else {
+                merged[merged_len] = Some(rect);
+                merged_len += 1;
+            }
+        }
+        self.dirty_rects = [None; MAX_DIRTY_RECTS];
+        self.dirty_count = merged_len;
+        for i in 0..merged_len {
+            self.dirty_rects[i] = merged[i];
         }
     }
 
     fn recalc_dirty_area(&mut self) {
-        let mut area = 0usize;
+        let mut area: usize = 0;   // явний тип usize
         for i in 0..self.dirty_count {
             if let Some(rect) = self.dirty_rects[i] {
                 area = area.saturating_add(rect.area());
@@ -324,12 +316,9 @@ impl Optimizer {
         self.dirty_count = 0;
         self.dirty_area = 0;
     }
-
-    fn force_gc(&mut self) {
-        self.clear_dirty_rects();
-    }
 }
 
+// Глобальний синглтон
 static mut OPTIMIZER: Option<Optimizer> = None;
 
 pub fn init_optimizer(fb: &Framebuffer) {
