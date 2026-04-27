@@ -1,4 +1,4 @@
-// optimizer.rs - runtime redraw optimizer for HouseOS (fixed, no_std)
+// optimizer.rs - runtime redraw optimizer for HouseOS (improved, no_std)
 // Зберігає старий API, виправляє логічні помилки
 
 use crate::display::Framebuffer;
@@ -13,7 +13,7 @@ const LOW_MEMORY_SKIP_DIV: usize = 2;
 const MAX_FULL_REDRAW_STREAK: usize = 360;
 const LOW_MEM_RECOVERY_FRAMES: usize = 600;   // через скільки кадрів вийти з low-memory
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct DirtyRect {
     pub x: usize,
     pub y: usize,
@@ -26,10 +26,12 @@ impl DirtyRect {
         Self { x, y, w, h }
     }
 
+    #[inline]
     fn area(&self) -> usize {
         self.w.saturating_mul(self.h)
     }
 
+    #[inline]
     fn intersects_or_nearby(&self, other: &DirtyRect) -> bool {
         let self_right = self.x.saturating_add(self.w).saturating_add(NEARBY_MERGE_GAP);
         let other_right = other.x.saturating_add(other.w).saturating_add(NEARBY_MERGE_GAP);
@@ -41,6 +43,7 @@ impl DirtyRect {
             || other_bottom <= self.y)
     }
 
+    #[inline]
     fn merge(&mut self, other: &DirtyRect) {
         let x1 = self.x.min(other.x);
         let y1 = self.y.min(other.y);
@@ -50,6 +53,13 @@ impl DirtyRect {
         self.y = y1;
         self.w = x2.saturating_sub(x1);
         self.h = y2.saturating_sub(y1);
+    }
+
+    /// Об'єднує два прямокутники, повертаючи новий (без зміни self)
+    pub fn merged(&self, other: &DirtyRect) -> Self {
+        let mut result = *self;
+        result.merge(other);
+        result
     }
 }
 
@@ -100,6 +110,8 @@ impl Optimizer {
         self.clear_dirty_rects();
     }
 
+    /// Слід викликати на початку кожного кадру.
+    /// Повертає true, якщо кадр слід рендерити (з частковим або повним оновленням).
     pub fn begin_frame(&mut self) -> bool {
         if !self.optimization_enabled {
             return true;
@@ -117,9 +129,11 @@ impl Optimizer {
             self.low_mem_skip_counter = 0;
         }
 
+        // Пропуск кадрів у low-memory, якщо немає брудних областей
         if self.low_memory_mode && self.dirty_count == 0 {
             self.low_mem_skip_counter = self.low_mem_skip_counter.wrapping_add(1);
-            if self.low_mem_skip_counter % LOW_MEMORY_SKIP_DIV != 0 {
+            // Якщо full_redraw_needed, пропускати не можна
+            if self.low_mem_skip_counter % LOW_MEMORY_SKIP_DIV != 0 && !self.full_redraw_needed {
                 return false;
             }
         } else {
@@ -129,6 +143,7 @@ impl Optimizer {
         true
     }
 
+    /// Завершує кадр; очищає брудні прямокутники, якщо не потрібне повне перемальовування.
     pub fn end_frame(&mut self) {
         if !self.optimization_enabled {
             return;
@@ -138,6 +153,7 @@ impl Optimizer {
         }
     }
 
+    /// Додає прямокутник до списку змінених областей.
     pub fn add_dirty_rect(&mut self, x: usize, y: usize, w: usize, h: usize) {
         if !self.optimization_enabled || w == 0 || h == 0 || self.full_redraw_needed {
             return;
@@ -150,6 +166,7 @@ impl Optimizer {
             self.request_full_redraw();
             return;
         }
+        // Шукаємо існуючий прямокутник, що перетинається або поруч
         for i in 0..self.dirty_count {
             if let Some(existing) = &mut self.dirty_rects[i] {
                 if existing.intersects_or_nearby(&rect) {
@@ -161,6 +178,7 @@ impl Optimizer {
                 }
             }
         }
+        // Інакше додаємо новий
         self.dirty_rects[self.dirty_count] = Some(rect);
         self.dirty_count += 1;
         self.coalesce_dirty_rects();
@@ -168,10 +186,12 @@ impl Optimizer {
         self.check_dirty_budget();
     }
 
+    /// Чи потрібне повне перемальовування всього екрану.
     pub fn should_redraw_full(&self) -> bool {
         self.full_redraw_needed || !self.optimization_enabled
     }
 
+    /// Позначає, що повне перемальовування виконано, і брудні області більше не актуальні.
     pub fn mark_clean(&mut self) {
         self.full_redraw_needed = false;
         self.full_redraw_streak = 0;
@@ -179,6 +199,33 @@ impl Optimizer {
         self.clear_dirty_rects();
     }
 
+    /// Отримати зріз поточних брудних прямокутників (для часткового оновлення).
+    pub fn dirty_rects(&self) -> &[DirtyRect] {
+        // Трансмутуємо Option<DirtyRect> у DirtyRect, бо всі Some в межах dirty_count
+        unsafe {
+            core::slice::from_raw_parts(
+                self.dirty_rects.as_ptr() as *const DirtyRect,
+                self.dirty_count,
+            )
+        }
+    }
+
+    /// Об'єднаний прямокутник, що охоплює всі брудні області.
+    /// Може бути використаний для швидкого (але надлишкового) копіювання.
+    pub fn dirty_bounding_box(&self) -> Option<DirtyRect> {
+        if self.dirty_count == 0 {
+            return None;
+        }
+        let drects = self.dirty_rects();
+        let mut bbox = drects[0];
+        for rect in &drects[1..] {
+            bbox = bbox.merged(rect);
+        }
+        Some(bbox)
+    }
+
+    /// Захист від зависань: якщо повне перемальовування триває надто довго,
+    /// примусово вмикає режим низької пам'яті.
     pub fn prevent_hang(&mut self) -> bool {
         if !self.optimization_enabled {
             return false;
@@ -253,54 +300,47 @@ impl Optimizer {
         }
     }
 
+    // Покращена коалесценція: сортування на місці та об'єднання без додаткового масиву.
     fn coalesce_dirty_rects(&mut self) {
         if self.dirty_count <= 1 {
             return;
         }
-        let mut tmp = [None; MAX_DIRTY_RECTS];
-        let mut tmp_len = 0;
+
+        // Сортування бульбашкою на місці (n <= 24)
         for i in 0..self.dirty_count {
-            if let Some(rect) = self.dirty_rects[i] {
-                tmp[tmp_len] = Some(rect);
-                tmp_len += 1;
-            }
-        }
-        // Сортування бульбашкою (n <= 24)
-        for i in 0..tmp_len {
-            for j in i + 1..tmp_len {
-                let a = tmp[i].unwrap();
-                let b = tmp[j].unwrap();
+            for j in i + 1..self.dirty_count {
+                let a = self.dirty_rects[i].unwrap();
+                let b = self.dirty_rects[j].unwrap();
                 if a.x > b.x || (a.x == b.x && a.y > b.y) {
-                    tmp.swap(i, j);
+                    self.dirty_rects.swap(i, j);
                 }
             }
         }
-        let mut merged = [None; MAX_DIRTY_RECTS];
-        let mut merged_len = 0;
-        for i in 0..tmp_len {
-            let rect = tmp[i].unwrap();
-            if merged_len == 0 {
-                merged[merged_len] = Some(rect);
-                merged_len += 1;
-                continue;
-            }
-            let last = merged[merged_len - 1].as_mut().unwrap();
-            if last.intersects_or_nearby(&rect) {
-                last.merge(&rect);
+
+        // Об'єднання перекривних/близьких прямокутників з видаленням поглинутих
+        let mut write_idx = 0;
+        for read_idx in 1..self.dirty_count {
+            let current = self.dirty_rects[write_idx].unwrap();
+            let next = self.dirty_rects[read_idx].unwrap();
+            if current.intersects_or_nearby(&next) {
+                // Об'єднуємо next у current
+                let mut merged = current;
+                merged.merge(&next);
+                self.dirty_rects[write_idx] = Some(merged);
             } else {
-                merged[merged_len] = Some(rect);
-                merged_len += 1;
+                write_idx += 1;
+                self.dirty_rects[write_idx] = self.dirty_rects[read_idx];
             }
         }
-        self.dirty_rects = [None; MAX_DIRTY_RECTS];
-        self.dirty_count = merged_len;
-        for i in 0..merged_len {
-            self.dirty_rects[i] = merged[i];
+        self.dirty_count = write_idx + 1;
+        // Очищаємо зайві слоти (не обов'язково, але для чистоти)
+        for i in self.dirty_count..MAX_DIRTY_RECTS {
+            self.dirty_rects[i] = None;
         }
     }
 
     fn recalc_dirty_area(&mut self) {
-        let mut area: usize = 0;   // явний тип usize
+        let mut area: usize = 0;
         for i in 0..self.dirty_count {
             if let Some(rect) = self.dirty_rects[i] {
                 area = area.saturating_add(rect.area());
@@ -310,7 +350,7 @@ impl Optimizer {
     }
 
     fn clear_dirty_rects(&mut self) {
-        for i in 0..self.dirty_count {
+        for i in 0..MAX_DIRTY_RECTS {
             self.dirty_rects[i] = None;
         }
         self.dirty_count = 0;
@@ -337,7 +377,7 @@ pub fn get_optimizer() -> Option<&'static mut Optimizer> {
 macro_rules! dirty_rect {
     ($x:expr, $y:expr, $w:expr, $h:expr) => {
         if let Some(opt) = $crate::optimizer::get_optimizer() {
-            opt.add_dirty_rect($x, $y, $w, $h);
+            opt.add_dirty_rect($x as usize, $y as usize, $w as usize, $h as usize);
         }
     };
 }

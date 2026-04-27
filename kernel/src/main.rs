@@ -23,6 +23,7 @@ mod system;
 mod optimizer;
 mod memory;
 mod power;
+mod image;          // JPEG-декодер
 #[path = "../../drivers/mod.rs"]
 mod drivers;
 
@@ -223,6 +224,8 @@ pub extern "C" fn _start() -> ! {
                 let is_fat = module_is_fat32(start, end);
                 let is_bg = name_starts_with(name, b"background")
                     || name_ends_with(name, b"background.raw")
+                    || name_ends_with(name, b"background.jpg")
+                    || name_ends_with(name, b"background.jpeg")
                     || module_is_raw_bg(start, end);
                 let is_initrd = name_starts_with(name, b"initrd")
                     || name_ends_with(name, b".tar")
@@ -291,20 +294,37 @@ fn kernel_main(
 
     let mut drew_bg = false;
 
+    // ------------------------------------------------------------
+    //  Перевірка та декодування JPEG або RAW
+    // ------------------------------------------------------------
     if let Some(bg) = bgraw {
-        drew_bg = display::draw_bgra_image(&fb, bg.start as *const u8, bg.end - bg.start);
+        let bg_data = unsafe { core::slice::from_raw_parts(bg.start as *const u8, bg.end - bg.start) };
+        // Сигнатура JPEG?
+        if bg_data.len() >= 2 && bg_data[0] == 0xFF && bg_data[1] == 0xD8 {
+            let ok = image::decode_jpeg(bg_data);
+            if ok {
+                vga_write(b"JPG OK\n");
+                drew_bg = display::draw_bgra_image(&fb, image::get_bgra_ptr(), image::get_bgra_len());
+            } else {
+                vga_write(b"JPG ERR\n");
+            }
+        } else {
+            // Сподіваємось, що це RAW BGRA
+            drew_bg = display::draw_bgra_image(&fb, bg.start as *const u8, bg.end - bg.start);
+            vga_write(b"RAW\n");
+        }
     } else if let Some(initrd_mod) = initrd {
         drew_bg = draw_background(initrd_mod.start as *const u8, initrd_mod.end as *const u8, &fb);
     }
+    // ------------------------------------------------------------
 
     if !drew_bg {
-        display::fill(&fb, 0x00F8F8F8);
+        display::fill(&fb, 0x00F8F8F8);   // сіре тло, якщо нічого не завантажилось
     }
 
     desktop::capture(&fb);
     display::present(&fb);
 
-    // Зберегти час завантаження для uptime
     if let Some(boot_time) = rtc::read_time() {
         system::set_boot_time(boot_time);
     }
@@ -319,7 +339,6 @@ fn kernel_main(
         fb_bpp: fb.bpp,
     });
 
-    // Ініціалізація драйверів
     let _usb = drivers::usb::init();
     let _net = drivers::net::init();
     drivers::battery_init();
@@ -337,6 +356,8 @@ fn kernel_main(
 
     input::run(&fb, cursor_raw, fs_img)
 }
+
+// ---------------------- Допоміжні функції (без змін) ----------------------
 
 fn module_string(tag_ptr: usize, tag_size: usize) -> &'static [u8] {
     let base = tag_ptr + core::mem::size_of::<Mb2ModuleTag>();
@@ -460,6 +481,15 @@ fn read_u32_le(ptr: *const u8) -> u32 {
 }
 
 fn draw_background(start: *const u8, end: *const u8, fb: &Framebuffer) -> bool {
+    // Пошук JPEG у tar-архіві
+    if let Some((data, size)) = find_tar_file(start, end, b"background.jpg")
+        .or_else(|| find_tar_file(start, end, b"background.jpeg"))
+    {
+        if image::decode_jpeg(unsafe { core::slice::from_raw_parts(data, size) }) {
+            return display::draw_bgra_image(fb, image::get_bgra_ptr(), image::get_bgra_len());
+        }
+    }
+    // Запасний RAW
     if let Some((data, size)) = find_tar_file(start, end, b"background.raw") {
         return display::draw_bgra_image(fb, data, size);
     }

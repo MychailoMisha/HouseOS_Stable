@@ -1,3 +1,5 @@
+// input.rs
+
 use crate::browser::Browser;
 use crate::calculator::Calculator;
 use crate::clipboard::ClipboardWindow;
@@ -15,7 +17,7 @@ use crate::rtc;
 use crate::start_menu::{StartAction, StartMenu};
 use crate::status_bar;
 use crate::system;
-use crate::taskbar;
+use crate::taskbar::{self, TaskbarEntry};
 use crate::window;
 use core::arch::asm;
 
@@ -73,6 +75,9 @@ pub fn run(
         WinKind::Browser,
         WinKind::Notepad,
     ];
+    // Масив «відкритості» (true – застосунок запущено, не закрито хрестиком)
+    let mut open = [false; WIN_COUNT];
+
     let mut dragging: Option<(WinKind, usize, usize)> = None;
     let mut need_redraw = true;
     let mut status_only_redraw = false;
@@ -204,8 +209,31 @@ pub fn run(
                 if left && !prev_left {
                     let mut handled = false;
 
+                    // Побудова списку відкритих вікон для панелі завдань
+                    let visibility = visibility_state(
+                        &console,
+                        &explorer,
+                        &clipboard,
+                        &calculator,
+                        &browser,
+                        &notepad,
+                    );
+                    let mut entries_buf = [TaskbarEntry { index: 0, label: &[], visible: false }; WIN_COUNT];
+                    let mut entry_count = 0;
+                    for i in 0..WIN_COUNT {
+                        if open[i] {
+                            entries_buf[entry_count] = TaskbarEntry {
+                                index: i,
+                                label: TASKBAR_LABELS[i],
+                                visible: visibility[i],
+                            };
+                            entry_count += 1;
+                        }
+                    }
+                    let entries = &entries_buf[..entry_count];
+
                     if system::ui_settings().status_bar {
-                        if let Some(hit) = taskbar::hit_test(fb, mouse_x, mouse_y, WIN_COUNT) {
+                        if let Some(hit) = taskbar::hit_test(fb, mouse_x, mouse_y, entries) {
                             if hit == taskbar::HIT_START {
                                 if start_menu.is_visible() {
                                     start_menu.hide(fb);
@@ -214,7 +242,8 @@ pub fn run(
                                 }
                                 need_redraw = true;
                                 handled = true;
-                            } else if hit < WIN_COUNT {
+                            } else {
+                                // hit містить оригінальний індекс вікна
                                 let kind = kind_from_index(hit);
                                 let focused = focused_window(
                                     &order,
@@ -281,6 +310,7 @@ pub fn run(
                                 &mut notepad,
                                 &mut order,
                                 &mut status_visible,
+                                &mut open,
                             );
                             need_redraw = true;
                             handled = true;
@@ -289,6 +319,9 @@ pub fn run(
 
                     if !handled {
                         for kind in order.iter().rev().copied() {
+                            if !open[win_index(kind)] {
+                                continue;
+                            }
                             if !win_visible(
                                 kind,
                                 &console,
@@ -313,6 +346,8 @@ pub fn run(
                             );
                             let close = window::close_rect(wx, wy, ww);
                             if window::hit(mouse_x, mouse_y, close) {
+                                // Закриття хрестиком – прибираємо з панелі
+                                open[win_index(kind)] = false;
                                 win_hide(
                                     kind,
                                     fb,
@@ -331,6 +366,7 @@ pub fn run(
 
                             let min_btn = window::minimize_rect(wx, wy, ww);
                             if window::hit(mouse_x, mouse_y, min_btn) {
+                                // Згортання – залишаємо відкритим
                                 win_hide(
                                     kind,
                                     fb,
@@ -438,7 +474,7 @@ pub fn run(
                     need_redraw = true;
                 } else {
                     for kind in order.iter().rev().copied() {
-                        if win_visible(
+                        if open[win_index(kind)] && win_visible(
                             kind,
                             &console,
                             &explorer,
@@ -447,6 +483,7 @@ pub fn run(
                             &browser,
                             &notepad,
                         ) {
+                            // Esc згортає, а не закриває
                             win_hide(
                                 kind,
                                 fb,
@@ -540,6 +577,7 @@ pub fn run(
                         &mut browser,
                         &mut notepad,
                     );
+                    open[win_index(WinKind::Console)] = true;
                     bring_to_front(&mut order, WinKind::Console);
                     need_redraw = true;
                 }
@@ -576,6 +614,7 @@ pub fn run(
                                     &mut browser,
                                     &mut notepad,
                                 );
+                                open[win_index(WinKind::Explorer)] = true;
                                 bring_to_front(&mut order, WinKind::Explorer);
                                 need_redraw = true;
                             }
@@ -590,16 +629,19 @@ pub fn run(
                                     &mut browser,
                                     &mut notepad,
                                 );
+                                open[win_index(WinKind::Clipboard)] = true;
                                 bring_to_front(&mut order, WinKind::Clipboard);
                                 need_redraw = true;
                             }
                             ConsoleAction::OpenNotepad => {
                                 notepad.open_empty(fb);
+                                open[win_index(WinKind::Notepad)] = true;
                                 bring_to_front(&mut order, WinKind::Notepad);
                                 need_redraw = true;
                             }
                             ConsoleAction::OpenBrowser => {
                                 browser.show(fb);
+                                open[win_index(WinKind::Browser)] = true;
                                 bring_to_front(&mut order, WinKind::Browser);
                                 need_redraw = true;
                             }
@@ -635,7 +677,7 @@ pub fn run(
             }
         }
 
-        if handle_explorer_action(fb, &mut explorer, &mut notepad, &mut order) {
+        if handle_explorer_action(fb, &mut explorer, &mut notepad, &mut order, &mut open) {
             need_redraw = true;
         }
 
@@ -658,6 +700,7 @@ pub fn run(
                 &start_menu,
                 &order,
                 last_time,
+                &open,
             );
             need_redraw = false;
             status_only_redraw = false;
@@ -682,6 +725,7 @@ pub fn run(
                 &notepad,
                 &order,
                 start_menu.is_visible(),
+                &open,
             );
             status_only_redraw = false;
             did_present = true;
@@ -699,6 +743,8 @@ pub fn run(
         }
     }
 }
+
+// ... (інші функції, що не змінилися, залишаються без змін, але тут ми їх теж наводимо для повноти)
 
 #[derive(Copy, Clone, PartialEq)]
 enum WinKind {
@@ -797,6 +843,7 @@ fn handle_start_action(
     notepad: &mut Notepad,
     order: &mut [WinKind; WIN_COUNT],
     status_visible: &mut bool,
+    open: &mut [bool; WIN_COUNT],
 ) {
     match action {
         StartAction::OpenConsole => {
@@ -811,6 +858,7 @@ fn handle_start_action(
                 browser,
                 notepad,
             );
+            open[win_index(WinKind::Console)] = true;
             bring_to_front(order, WinKind::Console);
         }
         StartAction::OpenExplorer => {
@@ -825,6 +873,7 @@ fn handle_start_action(
                 browser,
                 notepad,
             );
+            open[win_index(WinKind::Explorer)] = true;
             bring_to_front(order, WinKind::Explorer);
         }
         StartAction::OpenClipboard => {
@@ -839,21 +888,25 @@ fn handle_start_action(
                 browser,
                 notepad,
             );
+            open[win_index(WinKind::Clipboard)] = true;
             bring_to_front(order, WinKind::Clipboard);
         }
         StartAction::OpenNotepad => {
             start_menu.hide(fb);
             notepad.open_empty(fb);
+            open[win_index(WinKind::Notepad)] = true;
             bring_to_front(order, WinKind::Notepad);
         }
         StartAction::OpenBrowser => {
             start_menu.hide(fb);
             browser.show(fb);
+            open[win_index(WinKind::Browser)] = true;
             bring_to_front(order, WinKind::Browser);
         }
         StartAction::OpenBin => {
             start_menu.hide(fb);
             explorer.show_bin(fb);
+            open[win_index(WinKind::Explorer)] = true;
             bring_to_front(order, WinKind::Explorer);
         }
         StartAction::OpenCalculator => {
@@ -868,6 +921,7 @@ fn handle_start_action(
                 browser,
                 notepad,
             );
+            open[win_index(WinKind::Calculator)] = true;
             bring_to_front(order, WinKind::Calculator);
         }
         StartAction::ToggleTheme => {
@@ -888,6 +942,7 @@ fn handle_explorer_action(
     explorer: &mut Explorer,
     notepad: &mut Notepad,
     order: &mut [WinKind; WIN_COUNT],
+    open: &mut [bool; WIN_COUNT],
 ) -> bool {
     match explorer.take_action() {
         ExplorerAction::OpenTextFile {
@@ -897,6 +952,7 @@ fn handle_explorer_action(
             size,
         } => {
             notepad.open_file(fb, cluster, size, &name[..name_len]);
+            open[win_index(WinKind::Notepad)] = true;
             bring_to_front(order, WinKind::Notepad);
             true
         }
@@ -1151,11 +1207,12 @@ fn redraw_all(
     start_menu: &StartMenu,
     order: &[WinKind; WIN_COUNT],
     now: Option<rtc::RtcTime>,
+    open: &[bool; WIN_COUNT],
 ) {
     desktop::restore(fb);
 
     for kind in order.iter().copied() {
-        if win_visible(kind, console, explorer, clipboard, calculator, browser, notepad) {
+        if open[win_index(kind)] && win_visible(kind, console, explorer, clipboard, calculator, browser, notepad) {
             win_draw(kind, fb, console, explorer, clipboard, calculator, browser, notepad);
         }
     }
@@ -1164,16 +1221,24 @@ fn redraw_all(
         if let Some(t) = now {
             status_bar::draw(fb, t);
         }
+        let visibility = visibility_state(console, explorer, clipboard, calculator, browser, notepad);
+        let mut entries_buf = [TaskbarEntry { index: 0, label: &[], visible: false }; WIN_COUNT];
+        let mut entry_count = 0;
+        for i in 0..WIN_COUNT {
+            if open[i] {
+                entries_buf[entry_count] = TaskbarEntry {
+                    index: i,
+                    label: TASKBAR_LABELS[i],
+                    visible: visibility[i],
+                };
+                entry_count += 1;
+            }
+        }
+        let entries = &entries_buf[..entry_count];
         let focused = focused_window(order, console, explorer, clipboard, calculator, browser, notepad)
-            .map(win_index);
-        let visible = visibility_state(console, explorer, clipboard, calculator, browser, notepad);
-        taskbar::draw(
-            fb,
-            &TASKBAR_LABELS,
-            &visible,
-            focused,
-            start_menu.is_visible(),
-        );
+            .map(|kind| win_index(kind))
+            .filter(|&idx| open[idx]);
+        taskbar::draw(fb, entries, focused, start_menu.is_visible());
     }
 
     if start_menu.is_visible() {
@@ -1199,6 +1264,7 @@ fn redraw_status_only(
     notepad: &Notepad,
     order: &[WinKind; WIN_COUNT],
     start_visible: bool,
+    open: &[bool; WIN_COUNT],
 ) {
     if !system::ui_settings().status_bar {
         return;
@@ -1211,10 +1277,24 @@ fn redraw_status_only(
     cursor::restore_background(fb, mouse_x, mouse_y);
     status_bar::draw(fb, t);
 
+    let visibility = visibility_state(console, explorer, clipboard, calculator, browser, notepad);
+    let mut entries_buf = [TaskbarEntry { index: 0, label: &[], visible: false }; WIN_COUNT];
+    let mut entry_count = 0;
+    for i in 0..WIN_COUNT {
+        if open[i] {
+            entries_buf[entry_count] = TaskbarEntry {
+                index: i,
+                label: TASKBAR_LABELS[i],
+                visible: visibility[i],
+            };
+            entry_count += 1;
+        }
+    }
+    let entries = &entries_buf[..entry_count];
     let focused = focused_window(order, console, explorer, clipboard, calculator, browser, notepad)
-        .map(win_index);
-    let visible = visibility_state(console, explorer, clipboard, calculator, browser, notepad);
-    taskbar::draw(fb, &TASKBAR_LABELS, &visible, focused, start_visible);
+        .map(|kind| win_index(kind))
+        .filter(|&idx| open[idx]);
+    taskbar::draw(fb, entries, focused, start_visible);
 
     cursor::save_background(fb, mouse_x, mouse_y);
     cursor::draw(fb, mouse_x, mouse_y, cursor_raw);
